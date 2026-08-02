@@ -95,7 +95,6 @@ class JobManager:
         self._worker_tasks.clear()
 
     async def _worker_loop(self, worker_id: int) -> None:
-        current_job_id = None
         try:
             while True:
                 current_job_id = await self._queue.dequeue()
@@ -104,11 +103,10 @@ class JobManager:
                 if not job or not self._pipeline:
                     job_logger.log_error(current_job_id, RuntimeError("Job missing or pipeline not attached"))
                     await self._queue.task_done()
-                    current_job_id = None
                     continue
 
                 job_logger.log_started(current_job_id)
-                job_failed = False
+                job_completed_successfully = False
                 
                 try:
                     await self._concurrency_manager.acquire_processing_slot(job.user_id)
@@ -127,9 +125,26 @@ class JobManager:
                     scene_count = len(job.page_data.scenes) if job.page_data else 0
                     element_count = sum(len(s.elements) for s in job.page_data.scenes) if job.page_data else 0
                     job_logger.log_completed(current_job_id, scene_count, element_count)
+                    job_completed_successfully = True
+
+                except asyncio.CancelledError:
+                    # الإلغاء الآمن (Re-enqueue on Cancel)
+                    logger.warning(f"Worker {worker_id} cancelled during JobID={current_job_id}. Re-enqueuing...")
+                    try:
+                        async with self._lock:
+                            job.state = JobState.WAITING
+                            self._registry[job.job_id] = job
+                        self._queue.enqueue_nowait(current_job_id)
+                        logger.info(f"JobID={current_job_id} re-enqueued successfully.")
+                    except asyncio.QueueFull:
+                        logger.error(f"Failed to re-enqueue JobID={current_job_id}: Queue is full! Job is lost.")
+                        job.state = JobState.FAILED  # وضع علامة فاشل ليتم حذفه في الـ finally
+                    except Exception as e:
+                        logger.error(f"Failed to re-enqueue JobID={current_job_id}: {e}. Job is lost.")
+                        job.state = JobState.FAILED
+                    raise  # إعادة رمي الخطأ لإنهاء الـ Task نهائياً
 
                 except Exception as e:
-                    job_failed = True
                     job_logger.log_error(current_job_id, e)
                     await self._transition_state(job, JobState.FAILED)
                     if self._error_notifier:
@@ -139,35 +154,19 @@ class JobManager:
                             logger.error(f"Failed to send error notification: {notify_err}")
                 
                 finally:
+                    # يتم تنفيذ هذا الجزء سواء نجحت المهمة، فشلت، أو تم إلغاؤها (بعد إعادة وضعها في الطابور)
                     await self._concurrency_manager.release_processing_slot(job.user_id)
-                    await self._queue.task_done()
+                    await self._queue.task_done()  # إخبار الطابور أننا انتهينا من هذه النسخة
                     
-                    # إصلاح: لا يتم الحذف من السجل إلا إذا اكتملت المهمة أو فشلت definitively
-                    if job.state in [JobState.FINISHED, JobState.FAILED]:
+                    # لا نحذف من السجل إلا إذا اكتملت أو فشلت definitively
+                    # إذا تم إلغاؤها وأعيد وضعها، لن تكون حالتها FINISHED أو FAILED، لذا تبقى في السجل
+                    if job_completed_successfully or job.state == JobState.FAILED:
                         async with self._lock:
                             self._registry.pop(job.job_id, None)
                     
-                    current_job_id = None  # مسح الـ ID لأن المهمة انتهت (نجاح أو فشل)
                     await asyncio.sleep(self.POST_JOB_DELAY_SECONDS)
                     
         except asyncio.CancelledError:
-            # إصلاح: الإلغاء الآمن (Re-enqueue on Cancel)
-            if current_job_id:
-                logger.warning(f"Worker {worker_id} cancelled during JobID={current_job_id}. Re-enqueuing...")
-                try:
-                    job = await self.get_job(current_job_id)
-                    if job and job.state not in [JobState.FINISHED, JobState.FAILED]:
-                        async with self._lock:
-                            job.state = JobState.WAITING
-                            self._registry[job.job_id] = job  # التأكد من بقاءها في السجل
-                        
-                        self._queue.enqueue_nowait(current_job_id)
-                        logger.info(f"JobID={current_job_id} re-enqueued successfully.")
-                except asyncio.QueueFull:
-                    logger.error(f"Failed to re-enqueue JobID={current_job_id}: Queue is full!")
-                except Exception as e:
-                    logger.error(f"Failed to re-enqueue JobID={current_job_id}: {e}")
-            
             logger.info(f"Worker {worker_id} gracefully shut down.")
             return
 
