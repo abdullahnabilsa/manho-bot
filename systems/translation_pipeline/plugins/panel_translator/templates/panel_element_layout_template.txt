@@ -1,0 +1,11 @@
+{{#if display_type}}➤ *{{display_type}}*{{/if}}
+{{#if character}}🗣 *Character:* {{character}}{{/if}}
+🇬🇧 *Original*
+> {{original_text}}
+• ━ ━ ━ •
+🇸🇦 *Translation*
+> {{translated_text}}
+{{#if description}}• ━ ━ ━ •
+💡 *Description*
+> {{description}}{{/if}}
+• ━ ━ ━ ━ ━ ━ ━ ━ •

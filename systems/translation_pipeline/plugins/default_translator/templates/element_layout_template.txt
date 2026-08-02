@@ -1,0 +1,14 @@
+🧩 *العنصر {{element_number}} \({{type}}\)*
+{{#if speaker}}🗣 *المتحدث:* {{speaker}}{{/if}}
+🇬🇧 *النص الأصلي*
+> {{original}}
+• ━ ━ ━ •
+🇸🇦 *الترجمة العربية*
+> {{translation}}
+{{#if alternative}}• ━ ━ ━ •
+🔄 *ترجمة أخرى*
+> {{alternative}}{{/if}}
+{{#if reason}}• ━ ━ ━ •
+💡 *شرح الترجمة*
+> {{reason}}{{/if}}
+• ━ ━ ━ ━ ━ ━ ━ ━ •

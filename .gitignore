@@ -1,0 +1,22 @@
+# Environment variables
+.env
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+.venv
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

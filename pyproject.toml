@@ -1,0 +1,25 @@
+[project]
+name = "manga-translation-bot"
+version = "2.0.0"
+description = "Production-ready Manga/Manhwa Translation Telegram Bot with Isolated Systems Architecture"
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot[ext]>=21.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "aiohttp>=3.9",
+    "python-docx>=1.0.0",
+    "Pillow>=10.0.0",
+    "aiosqlite>=0.19.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff"
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
