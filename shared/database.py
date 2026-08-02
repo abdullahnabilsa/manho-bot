@@ -62,6 +62,12 @@ class Database:
                 expires_at REAL
             )
         """)
+        # NEW: Boost Waitlist Table
+        await self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS boost_waitlist (
+                user_id INTEGER PRIMARY KEY
+            )
+        """)
         await self._conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> None:

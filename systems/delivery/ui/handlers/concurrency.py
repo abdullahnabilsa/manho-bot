@@ -1,5 +1,6 @@
 # systems/delivery/ui/handlers/concurrency.py
 from __future__ import annotations
+import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -8,32 +9,54 @@ from utils.markdown_escaper import escape_markdown_v2
 async def boost_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     container = context.bot_data["container"]
-    conc_manager = container.concurrency
     
-    access = await conc_manager.check_user_access(user.id)
+    username = f"@{user.username}" if user.username else user.first_name
+    result = await container.concurrency.request_boost(user.id, username)
     
-    if access == "permanent":
-        await update.message.reply_text("✅ *أنت تمتلك صلاحية المعالجة المتوازية الدائمة\\.*", parse_mode=ParseMode.MARKDOWN_V2)
-        return
-        
-    if access == "lease":
-        await update.message.reply_text("⏳ *أنت تستخدم بالفعل خاصية التعزيز المؤقت\\.*\nاستمر في إرسال الصور\\!", parse_mode=ParseMode.MARKDOWN_V2)
-        return
-        
-    granted = await conc_manager.request_lease(user.id)
-    
-    if granted:
+    if result["status"] == "granted":
+        asyncio.create_task(container.concurrency.auto_expire_boost(user.id, context.bot))
         await update.message.reply_text(
             "🚀 *تم تفعيل التعزيز المؤقت\\!*\n\n"
-            "لديك الآن *10 دقائق* لمعالجة صورك بالتوازي \\(حتى 3 صور في نفس الوقت\\)\\. أرسل صورك الآن دفعة واحدة\\!",
+            "لديك الآن *10 دقائق* لمعالجة صورك بالتوازي \\(حتى 3 صور في نفس الوقت\\)\\. أرسل صورك الآن دفعة واحدة\\!\n\n"
+            "لإيقاف التعزيز يدوياً، أرسل الأمر `/unboost`\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        
+    elif result["status"] == "occupied":
+        active_user = escape_markdown_v2(result["active_user"])
+        await update.message.reply_text(
+            f"⏳ *المعالجة المتوازية مستخدمة حالياً*\n\n"
+            f"المستخدم {active_user} يستخدمها الآن\\.\n"
+            f"سيتم إعلامك فور انتهاء دورهم\\. انتظر دورك\\!",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        
+    elif result["status"] == "cooldown":
+        mins = int(result["expires_in"] // 60)
+        secs = int(result["expires_in"] % 60)
+        await update.message.reply_text(
+            f"⏳ *انتهى دورك للتو*\n\n"
+            f"يرجى الانتظار {mins} دقيقة و {secs} ثانية قبل أن تتمكن من استخدامها مرة أخرى\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        
+    elif result["status"] == "already_active":
+        await update.message.reply_text("ℹ️ أنت تستخدم المعالجة المتوازية حالياً بالفعل\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+async def unboost_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    container = context.bot_data["container"]
+    
+    success = await container.concurrency.deactivate_boost(user.id)
+    if success:
+        await container.concurrency.check_and_notify_waitlist(context.bot)
+        await update.message.reply_text(
+            "🔴 *تم إيقاف المعالجة المتوازية\\.*\n"
+            "يمكنك تفعيلها مرة أخرى بعد دقيقة من الآن\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
     else:
-        await update.message.reply_text(
-            "🚫 *لا توجد فتحات متاحة حالياً\\.*\n"
-            "الحد الأقصى للمعالجة المتوازية مفعّل لدى مستخدمين آخرين في هذه اللحظة\\. يرجى المحاولة لاحقاً\\.",
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
+        await update.message.reply_text("⚠️ *لا تستخدم المعالجة المتوازية حالياً\\.*", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def set_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -46,7 +69,6 @@ async def set_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
     limit = int(args[0])
     new_limit = await container.concurrency.set_global_limit(limit)
-    
     await update.message.reply_text(f"⚙️ *تم تحديث الحد الأقصى للمعالجة المتوازية*\nالحد الجديد: `{new_limit}`", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def grant_parallel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,7 +82,6 @@ async def grant_parallel_command(update: Update, context: ContextTypes.DEFAULT_T
         
     user_id = int(args[0])
     await container.concurrency.grant_permanent_access(user_id)
-    
     await update.message.reply_text(f"✅ *تم منح الصلاحية*\nالمستخدم `{escape_markdown_v2(str(user_id))}` يمتلك الآن معالجة متوازية دائمة\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def revoke_parallel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -74,5 +95,4 @@ async def revoke_parallel_command(update: Update, context: ContextTypes.DEFAULT_
         
     user_id = int(args[0])
     await container.concurrency.revoke_access(user_id)
-    
     await update.message.reply_text(f"📉 *تم سحب الصلاحية*\nتم إلغاء المعالجة المتوازية من المستخدم `{escape_markdown_v2(str(user_id))}`\\.", parse_mode=ParseMode.MARKDOWN_V2)

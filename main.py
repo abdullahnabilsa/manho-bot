@@ -48,7 +48,7 @@ from systems.delivery.ui.handlers.access import (
     add_user_command, remove_user_command, add_admin_command, remove_admin_command, 
     list_users_command, open_requests_command, close_requests_command, handle_request_callback
 )
-from systems.delivery.ui.handlers.concurrency import boost_command, set_limit_command, grant_parallel_command, revoke_parallel_command
+from systems.delivery.ui.handlers.concurrency import boost_command, unboost_command, set_limit_command, grant_parallel_command, revoke_parallel_command
 from systems.delivery.ui.handlers.messages import handle_image, handle_text
 from systems.delivery.ui.middlewares import state_purge_middleware, session_guard_middleware
 
@@ -150,7 +150,8 @@ async def post_init(app: Application) -> None:
         BotCommand("start", "بدء استخدام البوت"), BotCommand("settings", "فتح الإعدادات"),
         BotCommand("help", "دليل الاستخدام"), BotCommand("start_session", "بدء الجلسة"),
         BotCommand("end_session", "إنهاء الجلسة"), BotCommand("cancel", "إلغاء الجلسة"),
-        BotCommand("boost", "🚀 تفعيل المعالجة المتوازية")
+        BotCommand("boost", "🚀 تفعيل المعالجة المتوازية"),
+        BotCommand("unboost", "🔴 إيقاف المعالجة المتوازية")
     ]
     await bot.set_my_commands(public_commands)
     
@@ -200,6 +201,7 @@ def main() -> None:
     app.add_handler(CommandHandler("end_session", end_session_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("boost", boost_command))
+    app.add_handler(CommandHandler("unboost", unboost_command))
     
     app.add_handler(CommandHandler("addkey", add_public_key_command))
     app.add_handler(CommandHandler("listkeys", list_public_keys_command))
