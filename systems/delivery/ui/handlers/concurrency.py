@@ -60,7 +60,10 @@ async def unboost_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def set_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
-    if not container.access.is_super_admin(update.effective_user.id): return
+    # إصلاح: الرد بدلاً من التجاهل الصامت
+    if not container.access.is_super_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 هذا الأمر مخصص للسوبر أدمن فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
     
     args = context.args
     if not args or not args[0].isdigit():
@@ -68,12 +71,19 @@ async def set_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
         
     limit = int(args[0])
+    if limit < 1 or limit > 5:
+        await update.message.reply_text("⚠️ *الحد غير صالح*\nيرجى إدخال رقم بين 1 و 5\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
     new_limit = await container.concurrency.set_global_limit(limit)
     await update.message.reply_text(f"⚙️ *تم تحديث الحد الأقصى للمعالجة المتوازية*\nالحد الجديد: `{new_limit}`", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def grant_parallel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
-    if not container.access.is_super_admin(update.effective_user.id): return
+    # إصلاح: الرد بدلاً من التجاهل الصامت
+    if not container.access.is_super_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 هذا الأمر مخصص للسوبر أدمن فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
     
     args = context.args
     if not args or not args[0].isdigit():
@@ -82,11 +92,24 @@ async def grant_parallel_command(update: Update, context: ContextTypes.DEFAULT_T
         
     user_id = int(args[0])
     await container.concurrency.grant_permanent_access(user_id)
-    await update.message.reply_text(f"✅ *تم منح الصلاحية*\nالمستخدم `{escape_markdown_v2(str(user_id))}` يمتلك الآن معالجة متوازية دائمة\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+    # إصلاح: تحذير ذكي لمنع سوء الفهم
+    current_limit = await container.concurrency.get_global_limit()
+    if current_limit == 1:
+        await update.message.reply_text(
+            f"✅ *تم منح الصلاحية*\nالمستخدم `{escape_markdown_v2(str(user_id))}` يمتلك الآن معالجة متوازية دائمة\\.\n\n"
+            f"⚠️ *تنبيه هام:* الحد الأقصى الحالي للبوت هو `1`\\. لكي تظهر المعالجة المتوازية للمستخدم، يجب عليك رفع الحد باستخدام الأمر `/setlimit 2` أو أكثر\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+    else:
+        await update.message.reply_text(f"✅ *تم منح الصلاحية*\nالمستخدم `{escape_markdown_v2(str(user_id))}` يمتلك الآن معالجة متوازية دائمة\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def revoke_parallel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
-    if not container.access.is_super_admin(update.effective_user.id): return
+    # إصلاح: الرد بدلاً من التجاهل الصامت
+    if not container.access.is_super_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 هذا الأمر مخصص للسوبر أدمن فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
     
     args = context.args
     if not args or not args[0].isdigit():

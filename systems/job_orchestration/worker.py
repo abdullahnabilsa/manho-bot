@@ -13,9 +13,6 @@ from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 from shared.logger import job_logger
 from systems.translation_pipeline.models.page_job import PageJob, JobState
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 class JobSubmissionResult(Enum):
@@ -42,7 +39,6 @@ class JobManager:
         self._error_notifier: Optional[ErrorNotifierProtocol] = None
 
     def attach(self, pipeline: PipelineProtocol, error_notifier: ErrorNotifierProtocol) -> None:
-        """Injects the pipeline and error notifier dependencies."""
         self._pipeline = pipeline
         self._error_notifier = error_notifier
 
@@ -74,7 +70,6 @@ class JobManager:
                 self._worker_tasks.append(task)
 
     async def scale_workers(self, target_count: int) -> None:
-        """Dynamically scales the number of active worker tasks (EventBus subscriber)."""
         async with self._lock:
             current_count = len(self._worker_tasks)
             if target_count > current_count:
@@ -100,17 +95,20 @@ class JobManager:
         self._worker_tasks.clear()
 
     async def _worker_loop(self, worker_id: int) -> None:
+        current_job_id = None
         try:
             while True:
-                job_id = await self._queue.dequeue()
-                job = await self.get_job(job_id)
+                current_job_id = await self._queue.dequeue()
+                job = await self.get_job(current_job_id)
 
                 if not job or not self._pipeline:
-                    job_logger.log_error(job_id, RuntimeError("Job missing or pipeline not attached"))
+                    job_logger.log_error(current_job_id, RuntimeError("Job missing or pipeline not attached"))
                     await self._queue.task_done()
+                    current_job_id = None
                     continue
 
-                job_logger.log_started(job_id)
+                job_logger.log_started(current_job_id)
+                job_failed = False
                 
                 try:
                     await self._concurrency_manager.acquire_processing_slot(job.user_id)
@@ -128,24 +126,48 @@ class JobManager:
                     
                     scene_count = len(job.page_data.scenes) if job.page_data else 0
                     element_count = sum(len(s.elements) for s in job.page_data.scenes) if job.page_data else 0
-                    job_logger.log_completed(job_id, scene_count, element_count)
+                    job_logger.log_completed(current_job_id, scene_count, element_count)
 
                 except Exception as e:
-                    job_logger.log_error(job_id, e)
+                    job_failed = True
+                    job_logger.log_error(current_job_id, e)
                     await self._transition_state(job, JobState.FAILED)
                     if self._error_notifier:
                         try:
                             await self._error_notifier.notify(job, e)
                         except Exception as notify_err:
                             logger.error(f"Failed to send error notification: {notify_err}")
-
+                
                 finally:
                     await self._concurrency_manager.release_processing_slot(job.user_id)
                     await self._queue.task_done()
-                    async with self._lock:
-                        self._registry.pop(job.job_id, None)
+                    
+                    # إصلاح: لا يتم الحذف من السجل إلا إذا اكتملت المهمة أو فشلت definitively
+                    if job.state in [JobState.FINISHED, JobState.FAILED]:
+                        async with self._lock:
+                            self._registry.pop(job.job_id, None)
+                    
+                    current_job_id = None  # مسح الـ ID لأن المهمة انتهت (نجاح أو فشل)
                     await asyncio.sleep(self.POST_JOB_DELAY_SECONDS)
+                    
         except asyncio.CancelledError:
+            # إصلاح: الإلغاء الآمن (Re-enqueue on Cancel)
+            if current_job_id:
+                logger.warning(f"Worker {worker_id} cancelled during JobID={current_job_id}. Re-enqueuing...")
+                try:
+                    job = await self.get_job(current_job_id)
+                    if job and job.state not in [JobState.FINISHED, JobState.FAILED]:
+                        async with self._lock:
+                            job.state = JobState.WAITING
+                            self._registry[job.job_id] = job  # التأكد من بقاءها في السجل
+                        
+                        self._queue.enqueue_nowait(current_job_id)
+                        logger.info(f"JobID={current_job_id} re-enqueued successfully.")
+                except asyncio.QueueFull:
+                    logger.error(f"Failed to re-enqueue JobID={current_job_id}: Queue is full!")
+                except Exception as e:
+                    logger.error(f"Failed to re-enqueue JobID={current_job_id}: {e}")
+            
             logger.info(f"Worker {worker_id} gracefully shut down.")
             return
 
