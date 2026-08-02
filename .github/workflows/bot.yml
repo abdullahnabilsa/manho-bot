@@ -1,0 +1,53 @@
+name: Run Manga Translation Bot
+
+on:
+  # يسمح بتشغيل البوت يدوياً من واجهة GitHub
+  workflow_dispatch:
+    inputs:
+      run_duration:
+        description: 'مدة تشغيل البوت بالدقائق (الحد الأقصى 359)'
+        required: true
+        default: '300'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360 # الحد الأقصى المسموح به في GitHub Actions
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create .env file
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          AI_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ADMIN_IDS: ${{ secrets.SUPER_ADMIN_IDS }}
+        run: |
+          echo "MANGA_BOT_TELEGRAM_BOT_TOKEN=$TG_TOKEN" >> .env
+          echo "MANGA_BOT_AI_API_KEY=$AI_KEY" >> .env
+          echo "MANGA_BOT_SUPER_ADMIN_IDS=$ADMIN_IDS" >> .env
+
+      - name: Run Bot
+        run: |
+          echo "Starting bot for ${{ github.event.inputs.run_duration }} minutes..."
+          timeout ${{ github.event.inputs.run_duration }}m python main.py
+          echo "Bot stopped after timeout."
+
+      - name: Upload Database as Artifact
+        if: always() # يقوم برفع قاعدة البيانات دائماً سواء نجح أو فشل التشغيل
+        uses: actions/upload-artifact@v4
+        with:
+          name: manga-bot-database
+          path: manga_bot.db
+          if-no-files-found: warn
