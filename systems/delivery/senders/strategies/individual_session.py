@@ -46,7 +46,6 @@ class IndividualSessionStrategy:
 
         total_pages = await self._batch.add_page_data(job.user_id, job.page_data)
         
-        # Calculate accurate stats
         queue_size = await self._queue.size()
         total_received = await self._batch.get_received_count(job.user_id)
         processing_count = total_received - total_pages - queue_size
@@ -77,28 +76,32 @@ class IndividualSessionStrategy:
                     try:
                         await self._bot.send_document(
                             chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.txt")
+                            document=InputFile(file_io, filename=f"{base_filename}.txt"),
+                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
                         )
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
                         file_io.seek(0)
                         await self._bot.send_document(
                             chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.txt")
+                            document=InputFile(file_io, filename=f"{base_filename}.txt"),
+                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
                         )
                 if fmt in ["docx", "both"]:
                     file_io = await asyncio.to_thread(handler.generate_docx, [job.page_data])
                     try:
                         await self._bot.send_document(
                             chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.docx")
+                            document=InputFile(file_io, filename=f"{base_filename}.docx"),
+                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
                         )
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
                         file_io.seek(0)
                         await self._bot.send_document(
                             chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.docx")
+                            document=InputFile(file_io, filename=f"{base_filename}.docx"),
+                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
                         )
             finally:
                 await self._concurrency.release_chat_send_lock(job.chat_id)
@@ -161,7 +164,6 @@ class IndividualSessionStrategy:
             await self._concurrency.release_tracker_lock(job.user_id)
 
     async def compile_and_send(self, user_id: int, chat_id: int) -> None:
-        # In individual mode, this acts as a session cleanup triggered by /end_session
         tracker_id = await self._batch.get_tracker(user_id)
         if tracker_id:
             try:

@@ -1,4 +1,4 @@
-# systems/delivery/renderers/telegram.py
+# File: systems/delivery/renderers/telegram.py
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +29,8 @@ class TelegramRenderer:
                     chat_id=job.chat_id,
                     text=raw_text,
                     parse_mode=ParseMode.MARKDOWN_V2,
-                    disable_web_page_preview=True
+                    disable_web_page_preview=True,
+                    reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
                 )
                 if i < total_messages:
                     await asyncio.sleep(self.SEND_DELAY_SECONDS)
