@@ -45,9 +45,15 @@ class IndividualSessionStrategy:
             return job
 
         total_pages = await self._batch.add_page_data(job.user_id, job.page_data)
-        queue_size = await self._queue.size()
         
-        await self._send_stats_message(job, total_pages, queue_size)
+        # Calculate accurate stats
+        queue_size = await self._queue.size()
+        total_received = await self._batch.get_received_count(job.user_id)
+        processing_count = total_received - total_pages - queue_size
+        if processing_count < 0:
+            processing_count = 0
+            
+        await self._update_session_tracker(job, total_pages, queue_size, processing_count, total_received)
         
         user_settings = await self._settings.get_user_settings(job.user_id)
         output_method = user_settings.get("output_method", "files_only")
@@ -99,39 +105,73 @@ class IndividualSessionStrategy:
                 
         return job
 
-    async def _send_stats_message(self, job: PageJob, total_pages: int, queue_size: int) -> None:
-        session_data = await self._batch.get_session_data(job.user_id)
-        file_names = [escape_markdown_v2(pd.file_name) for pd in session_data if pd and pd.file_name]
-        
-        if len(file_names) > 25:
-            start_index = len(file_names) - 10
-            files_text = "_\\.\\.\\. عرض آخر 10 صور_\n" + "\n".join(
-                [f"{i}\\. `{name}`" for i, name in enumerate(file_names[-10:], start=start_index + 1)]
-            )
-        else:
-            files_text = "\n".join([f"{i}\\. `{name}`" for i, name in enumerate(file_names, start=1)])
-            
-        text = (
-            f"✅ *تمت معالجة الصور بنجاح وتخزينها في الجلسة\\.*\n\n"
-            f"📊 *إحصائيات الجلسة الحالية:*\n"
-            f"• الصور المترجمة: `{total_pages}`\n"
-            f"• الصور في الطابور: `{queue_size}`\n\n"
-            f"📄 *الصور المجهزة:*\n{files_text}\n"
-        )
-        
+    async def _update_session_tracker(self, job: PageJob, total_pages: int, queue_size: int, processing_count: int, total_received: int) -> None:
+        await self._concurrency.acquire_tracker_lock(job.user_id)
         try:
-            await self._bot.send_message(
-                chat_id=job.chat_id, 
-                text=text, 
-                parse_mode=ParseMode.MARKDOWN_V2
+            tracker_id = await self._batch.get_tracker(job.user_id)
+            
+            text = (
+                f"✅ *تمت معالجة الصور بنجاح وتخزينها في الجلسة\\.*\n\n"
+                f"📊 *إحصائيات الجلسة الحالية:*\n"
+                f"• إجمالي الصور المرسلة: `{total_received}`\n"
+                f"• تمت ترجمتها: `{total_pages}`\n"
+                f"• قيد المعالجة الآن: `{processing_count}`\n"
+                f"• في الطابور: `{queue_size}`\n\n"
+                f"_وضع التجميع الفردي: يتم إرسال ملف الترجمة فور انتهاء كل صورة\\._"
             )
-        except Exception as e:
-            logger.error(f"Failed to send individual stats message: {e}")
+                
+            if tracker_id:
+                try:
+                    await self._bot.edit_message_text(
+                        chat_id=job.chat_id, message_id=tracker_id,
+                        text=text, parse_mode=ParseMode.MARKDOWN_V2
+                    )
+                    return
+                except BadRequest as e:
+                    err_str = str(e).lower()
+                    if "message is not modified" in err_str:
+                        return
+                    if "message to edit not found" in err_str or "message can't be edited" in err_str:
+                        await self._batch.set_tracker(job.user_id, None)
+                        tracker_id = None
+                    else:
+                        return
+                except RetryAfter as e:
+                    await asyncio.sleep(e.retry_after)
+                    try:
+                        await self._bot.edit_message_text(
+                            chat_id=job.chat_id, message_id=tracker_id,
+                            text=text, parse_mode=ParseMode.MARKDOWN_V2
+                        )
+                    except Exception:
+                        pass
+                    return
+                except Exception:
+                    return
+                
+            if not tracker_id:
+                try:
+                    msg = await self._bot.send_message(
+                        chat_id=job.chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2
+                    )
+                    await self._batch.set_tracker(job.user_id, msg.message_id)
+                except Exception as e:
+                    logger.error(f"Failed to create new individual tracker: {e}")
+        finally:
+            await self._concurrency.release_tracker_lock(job.user_id)
 
     async def compile_and_send(self, user_id: int, chat_id: int) -> None:
+        # In individual mode, this acts as a session cleanup triggered by /end_session
+        tracker_id = await self._batch.get_tracker(user_id)
+        if tracker_id:
+            try:
+                await self._bot.delete_message(chat_id=chat_id, message_id=tracker_id)
+            except Exception:
+                pass
+                
         await self._bot.send_message(
             chat_id=chat_id,
-            text="✅ *اكتملت الجلسة بنجاح\\!*\nتم إرسال جميع ملفات الترجمة الفردية\\.",
+            text="✅ *اكتملت الجلسة بنجاح\\!*\nتم إرسال جميع ملفات الترجمة الفردية\\. يمكنك بدء جلسة جديدة متى شئت\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         await self._batch.clear_session(user_id)

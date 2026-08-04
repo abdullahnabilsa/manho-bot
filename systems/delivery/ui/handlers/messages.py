@@ -65,6 +65,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data['awaiting_session_filename'] = False
         await context.bot.send_message(chat_id=chat_id, text="↩️ *تم إلغاء انتظار الاسم وإضافة الصورة للطابور\\.*", parse_mode=ParseMode.MARKDOWN_V2)
     
+    # NEW: Increment received count immediately to fix stats accuracy
+    await batch_manager.increment_received_count(user.id)
+    
     queue_size_before = await queue_manager.size()
     
     job = PageJob(
@@ -125,6 +128,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             except Exception:
                 pass
     else:
+        # For individual mode, we just send a typing action. 
+        # The stats message will be created/updated by the IndividualSessionStrategy.
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         except Exception:

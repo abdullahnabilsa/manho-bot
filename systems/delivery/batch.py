@@ -20,6 +20,10 @@ class BatchManager:
         self._custom_filenames: Dict[int, str] = {}
         self._prompt_message_ids: Dict[int, int] = {}
         self._finalizing_users: Set[int] = set()
+        
+        # NEW: Pre-queue received counter to fix stats accuracy
+        self._received_counts: Dict[int, int] = {}
+        
         self._lock = asyncio.Lock()
 
     def _cleanup_stale_sessions(self) -> None:
@@ -37,6 +41,7 @@ class BatchManager:
             self._queued_files.pop(user_id, None)
             self._custom_filenames.pop(user_id, None)
             self._prompt_message_ids.pop(user_id, None)
+            self._received_counts.pop(user_id, None)
             self._finalizing_users.discard(user_id)
 
     async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
@@ -49,6 +54,7 @@ class BatchManager:
                 self._queued_files[user_id] = []
                 self._custom_filenames[user_id] = ""
                 self._prompt_message_ids[user_id] = None
+                self._received_counts[user_id] = 0
             self._finalizing_users.discard(user_id)
 
     async def get_session_persona(self, user_id: int) -> Optional[str]:
@@ -92,6 +98,7 @@ class BatchManager:
             self._queued_files.pop(user_id, None)
             self._custom_filenames.pop(user_id, None)
             self._prompt_message_ids.pop(user_id, None)
+            self._received_counts.pop(user_id, None)
             self._finalizing_users.discard(user_id)
 
     async def set_pending_compile(self, user_id: int) -> None:
@@ -120,6 +127,15 @@ class BatchManager:
     async def get_tracker(self, user_id: int) -> Optional[int]:
         async with self._lock:
             return self._session_trackers.get(user_id)
+
+    async def increment_received_count(self, user_id: int) -> int:
+        async with self._lock:
+            self._received_counts[user_id] = self._received_counts.get(user_id, 0) + 1
+            return self._received_counts[user_id]
+
+    async def get_received_count(self, user_id: int) -> int:
+        async with self._lock:
+            return self._received_counts.get(user_id, 0)
 
     async def add_queued_file(self, user_id: int, file_name: str) -> None:
         async with self._lock:
