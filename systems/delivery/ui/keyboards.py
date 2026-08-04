@@ -1,4 +1,4 @@
-# systems/delivery/ui/keyboards.py
+# File: systems/delivery/ui/keyboards.py
 from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 
@@ -25,12 +25,15 @@ def get_settings_dashboard_keyboard(user_settings: dict) -> InlineKeyboardMarkup
         output_method = "messages_and_files"
     output_display = "رسائل وملفات" if output_method == "messages_and_files" else ("رسائل تلجرام فقط" if output_method == "messages_only" else "ملفات فقط")
     fmt = user_settings.get("file_format", "docx").upper()
+    session_mode = user_settings.get("session_mode", "grouped")
+    session_display = "تجميع فردي" if session_mode == "individual" else "تجميع جماعي"
     
     keyboard = [
         [InlineKeyboardButton(f"🎭 المترجم: {persona}", callback_data="open_personas")],
         [InlineKeyboardButton(f"📨 الإرسال: {mode}", callback_data="open_delivery_mode")],
         [InlineKeyboardButton(f"📤 الإخراج: {output_display}", callback_data="open_output_method")],
         [InlineKeyboardButton(f"📄 الصيغة: {fmt}", callback_data="open_file_format")],
+        [InlineKeyboardButton(f"📦 وضع الجلسة: {session_display}", callback_data="open_session_mode")],
         [InlineKeyboardButton("🔐 مفتاح API الخاص", callback_data="open_api_key")],
         [InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]
     ]
@@ -68,6 +71,14 @@ def get_file_format_keyboard(current_fmt: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ TXT" if current_fmt == "txt" else "⬜ TXT", callback_data="set_fmt_txt")],
         [InlineKeyboardButton("✅ DOCX (Word)" if current_fmt == "docx" else "⬜ DOCX (Word)", callback_data="set_fmt_docx")],
         [InlineKeyboardButton("✅ كلاهما" if current_fmt == "both" else "⬜ كلاهما", callback_data="set_fmt_both")],
+        [InlineKeyboardButton("🔙 العودة للإعدادات", callback_data="open_settings")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_session_mode_keyboard(current_mode: str) -> InlineKeyboardMarkup:
+    keyboard = [
+        [InlineKeyboardButton("✅ تجميع جماعي (ملف واحد)" if current_mode == "grouped" else "⬜ تجميع جماعي (ملف واحد)", callback_data="set_session_grouped")],
+        [InlineKeyboardButton("✅ تجميع فردي (ملف لكل صورة)" if current_mode == "individual" else "⬜ تجميع فردي (ملف لكل صورة)", callback_data="set_session_individual")],
         [InlineKeyboardButton("🔙 العودة للإعدادات", callback_data="open_settings")]
     ]
     return InlineKeyboardMarkup(keyboard)

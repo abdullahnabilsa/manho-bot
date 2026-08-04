@@ -1,4 +1,4 @@
-# systems/delivery/ui/handlers/session.py
+# File: systems/delivery/ui/handlers/session.py
 from __future__ import annotations
 
 import logging
@@ -20,17 +20,31 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
     persona_name = await container.settings.get_persona(user_id)
     if not persona_name:
         persona_name = "Default Translator"
-    await container.batch.start_session(user_id, persona_name)
+        
+    session_mode = await container.settings.get_session_mode(user_id)
+    if not session_mode:
+        session_mode = "grouped"
+        
+    await container.batch.start_session(user_id, persona_name, session_mode)
+    
+    mode_text = "تجميع جماعي (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
     
     text = (
-        "🎬 *تم تفعيل وضع الجلسة بنجاح\\!*\n\n"
+        f"🎬 *تم تفعيل وضع الجلسة بنجاح\\!*\n\n"
+        f"📦 *وضع الجلسة الحالي:* {escape_markdown_v2(mode_text)}\n\n"
         "في هذا الوضع، تم تفعيل *الحماية القصوى* لمنع التشتت:\n"
         "• سيتم قبول *صور المانغا فقط*\\.\n"
         "• يمكنك إرسال *أي عدد من الصور* دفعة واحدة أو تباعاً\\.\n"
         "• سيتم *حذف* أي رسالة نصية، ملصق، أو أمر فوراً\\.\n\n"
-        "⚠️ *للخروج من هذا الوضع وتجميع الملفات:* اضغط زر *🔴 إنهاء الجلسة*\\.\n"
-        "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
     )
+    
+    if session_mode == "grouped":
+        text += "⚠️ *للخروج من هذا الوضع وتجميع الملفات:* اضغط زر *🔴 إنهاء الجلسة*\\.\n"
+    else:
+        text += "⚠️ *في هذا الوضع سيتم إرسال ملف الترجمة فور انتهاء معالجة كل صورة*\\.\n"
+        
+    text += "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
+    
     await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
 
 async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -39,6 +53,14 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if not await container.batch.is_session_active(user_id):
         await update.message.reply_text("⚠️ *لا توجد جلسة نشطة حالياً\\.*\nاضغط *🟢 بدء الجلسة* أولاً قبل إرسال الصور\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    session_mode = await container.batch.get_session_mode(user_id)
+    
+    if session_mode == "individual":
+        await container.batch.clear_session(user_id)
+        await container.batch.set_finalizing(user_id, False)
+        await update.message.reply_text("🚪 *تم إنهاء الجلسة الفردية بنجاح\\.*\nتم إرسال جميع الملفات سابقاً\\. يمكنك بدء جلسة جديدة متى شئت\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     session_data = await container.batch.get_session_data(user_id)

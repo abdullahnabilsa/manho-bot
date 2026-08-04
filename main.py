@@ -1,4 +1,4 @@
-# main.py
+# File: main.py
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +17,6 @@ from shared.logger import job_logger
 from shared.container import ServiceContainer
 from utils.image_optimizer import optimize_image
 
-# Systems will be imported here in subsequent phases
 from systems.access_control.manager import AccessManager
 from systems.access_control.api_key_manager import APIKeyManager
 from systems.access_control.user_settings import UserSettingsManager
@@ -34,8 +33,8 @@ from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 
 from systems.delivery.batch import BatchManager
 from systems.delivery.renderers.telegram import TelegramRenderer
-from systems.delivery.senders.direct import DirectSender
-from systems.delivery.senders.session import SessionSender
+from systems.delivery.senders.strategies.grouped_session import GroupedSessionStrategy
+from systems.delivery.senders.strategies.individual_session import IndividualSessionStrategy
 from systems.delivery.notifier import BotErrorNotifier
 from systems.delivery.pipeline import DeliveryPipeline
 
@@ -63,27 +62,22 @@ logger = logging.getLogger("manga_bot.main")
 async def post_init(app: Application) -> None:
     bot = app.bot
     
-    # 1. Shared Layer
     db = Database(db_path="manga_bot.db")
     await db.connect()
     event_bus = EventBus()
     
-    # 2. Access Control
     access_manager = AccessManager(db=db, super_admin_ids=settings.super_admin_ids)
     api_key_manager = APIKeyManager(db=db)
     settings_manager = UserSettingsManager(db=db)
     
-    # 3. AI Engine
     ai_provider = GeminiProvider(
         timeout=settings.ai_timeout_seconds, 
         cb_threshold=settings.cb_failure_threshold, 
         cb_cooldown=settings.cb_cooldown_seconds
     )
     
-    # 4. Translation Pipeline
     persona_registry = PersonaRegistry(plugins_dir="systems/translation_pipeline/plugins")
     
-    # 5. Job Orchestration
     queue_manager = AsyncSingleWorkerQueue(max_size=settings.queue_max_size)
     concurrency_db_store = ConcurrencyDBStore(db=db)
     concurrency_manager = ConcurrencyManager(db_store=concurrency_db_store, event_bus=event_bus)
@@ -96,19 +90,19 @@ async def post_init(app: Application) -> None:
         post_job_delay=settings.post_job_delay_seconds
     )
     
-    # Subscribe JobManager to EventBus for dynamic scaling (Decoupled)
     event_bus.subscribe("concurrency.limit_changed", job_manager.scale_workers)
     
-    # 6. Delivery
     batch_manager = BatchManager()
     telegram_renderer = TelegramRenderer()
     
-    direct_sender = DirectSender(
-        bot=bot, renderer=telegram_renderer, concurrency=concurrency_manager, 
-        settings=settings_manager, queue=queue_manager
+    grouped_strategy = GroupedSessionStrategy(
+        bot=bot, batch=batch_manager, settings=settings_manager,
+        concurrency=concurrency_manager, personas=persona_registry,
+        queue=queue_manager, renderer=telegram_renderer
     )
-    session_sender = SessionSender(
-        bot=bot, batch=batch_manager, settings=settings_manager, 
+    
+    individual_strategy = IndividualSessionStrategy(
+        bot=bot, batch=batch_manager, settings=settings_manager,
         concurrency=concurrency_manager, personas=persona_registry,
         queue=queue_manager, renderer=telegram_renderer
     )
@@ -122,19 +116,17 @@ async def post_init(app: Application) -> None:
         api_key_manager=api_key_manager,
         settings_manager=settings_manager,
         batch_manager=batch_manager,
-        direct_sender=direct_sender,
-        session_sender=session_sender,
+        grouped_strategy=grouped_strategy,
+        individual_strategy=individual_strategy,
         image_optimizer=optimize_image,
         queue_manager=queue_manager
     )
     
-    # 7. Wire Job Orchestration & Delivery
     job_manager.attach(
         pipeline=delivery_pipeline,
         error_notifier=error_notifier
     )
     
-    # 8. Service Container
     container = ServiceContainer(
         db=db, bot=bot, event_bus=event_bus,
         access=access_manager, api_keys=api_key_manager, settings=settings_manager,
@@ -145,7 +137,6 @@ async def post_init(app: Application) -> None:
     )
     app.bot_data["container"] = container
     
-    # 9. Set Bot Commands
     public_commands = [
         BotCommand("start", "بدء استخدام البوت"), BotCommand("settings", "فتح الإعدادات"),
         BotCommand("help", "دليل الاستخدام"), BotCommand("start_session", "بدء الجلسة"),
@@ -176,7 +167,6 @@ async def post_init(app: Application) -> None:
         except Exception as e:
             logger.warning(f"Could not set admin commands for {admin_id}: {e}")
             
-    # 10. Start Job Manager
     await job_manager.start()
 
 async def post_shutdown(app: Application) -> None:
@@ -188,12 +178,10 @@ async def post_shutdown(app: Application) -> None:
 def main() -> None:
     app = ApplicationBuilder().token(settings.telegram_bot_token).post_init(post_init).post_shutdown(post_shutdown).build()
 
-    # Middlewares
     app.add_handler(TypeHandler(Update, firewall_middleware), group=-3)
     app.add_handler(TypeHandler(Update, state_purge_middleware), group=-2)
     app.add_handler(TypeHandler(Update, session_guard_middleware), group=-1)
     
-    # Command Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("settings", settings_command))
@@ -219,17 +207,14 @@ def main() -> None:
     app.add_handler(CommandHandler("grantparallel", grant_parallel_command))
     app.add_handler(CommandHandler("revokeparallel", revoke_parallel_command))
     
-    # Message Handlers (Persistent Keyboard)
     app.add_handler(MessageHandler(filters.Regex("⚙️ الإعدادات"), settings_command))
     app.add_handler(MessageHandler(filters.Regex("📖 المساعدة"), help_command))
     app.add_handler(MessageHandler(filters.Regex("🟢 بدء الجلسة"), start_session_command))
     app.add_handler(MessageHandler(filters.Regex("🔴 إنهاء الجلسة"), end_session_command))
     
-    # Callback Handlers
     app.add_handler(CallbackQueryHandler(settings_callback, pattern="^(open_|set_|back_)"))
     app.add_handler(CallbackQueryHandler(handle_request_callback, pattern="^(accept_req|reject_req)"))
     
-    # Fallback Message Handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
 

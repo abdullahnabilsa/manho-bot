@@ -1,4 +1,4 @@
-# systems/delivery/ui/handlers/messages.py
+# File: systems/delivery/ui/handlers/messages.py
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +30,18 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pass
         return
 
+    is_session_active = await batch_manager.is_session_active(user.id)
+    if not is_session_active:
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="⚠️ *يرجى بدء جلسة أولاً*\n\nاضغط زر *🟢 بدء الجلسة* قبل إرسال الصور لترجمتها\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+        except Exception:
+            pass
+        return
+
     image_file_id: Optional[str] = None
     file_name: Optional[str] = None
     
@@ -53,7 +65,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data['awaiting_session_filename'] = False
         await context.bot.send_message(chat_id=chat_id, text="↩️ *تم إلغاء انتظار الاسم وإضافة الصورة للطابور\\.*", parse_mode=ParseMode.MARKDOWN_V2)
     
-    is_session_active = await batch_manager.is_session_active(user.id)
     queue_size_before = await queue_manager.size()
     
     job = PageJob(
@@ -74,7 +85,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    if is_session_active:
+    session_mode = await batch_manager.get_session_mode(user.id)
+    
+    if session_mode == "grouped":
         tracker_id = await batch_manager.get_tracker(user.id)
         
         current_msg_time = update.message.date if update.message.date else datetime.now(timezone.utc)
@@ -112,46 +125,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             except Exception:
                 pass
     else:
-        user_settings = await settings_manager.get_user_settings(user.id)
-        output_method = user_settings.get("output_method", "files_only")
-        if output_method == "chat_and_files":
-            output_method = "messages_and_files"
-        
-        if output_method == "messages_only":
-            try:
-                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-            except Exception:
-                pass
-        else:
-            if queue_size_before == 0:
-                direct_msg_id = context.user_data.get('direct_status_msg_id')
-                if direct_msg_id:
-                    try:
-                        await context.bot.delete_message(chat_id=chat_id, message_id=direct_msg_id)
-                    except Exception:
-                        pass
-                
-                text = "⏳ *جاري التحليل الآن\\.\\.\\.*"
-                try:
-                    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                    status_msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
-                    job.status_message_id = status_msg.message_id
-                    context.user_data['direct_status_msg_id'] = status_msg.message_id
-                except RetryAfter as e:
-                    await asyncio.sleep(e.retry_after)
-                    try:
-                        status_msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
-                        job.status_message_id = status_msg.message_id
-                        context.user_data['direct_status_msg_id'] = status_msg.message_id
-                    except Exception:
-                        pass
-                except TelegramError:
-                    pass
-            else:
-                try:
-                    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-                except Exception:
-                    pass
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception:
+            pass
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_user_api_key'):

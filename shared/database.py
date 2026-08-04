@@ -1,4 +1,4 @@
-# shared/database.py
+# File: shared/database.py
 from __future__ import annotations
 
 import aiosqlite
@@ -43,6 +43,14 @@ class Database:
                 file_format TEXT
             )
         """)
+        
+        # Migration: Add session_mode column if it doesn't exist
+        try:
+            await self._conn.execute("ALTER TABLE settings ADD COLUMN session_mode TEXT")
+            logger.info("Added 'session_mode' column to settings table.")
+        except aiosqlite.OperationalError:
+            pass # Column already exists
+
         await self._conn.execute("""
             CREATE TABLE IF NOT EXISTS api_keys (
                 key_value TEXT PRIMARY KEY,
@@ -62,12 +70,17 @@ class Database:
                 expires_at REAL
             )
         """)
-        # NEW: Boost Waitlist Table
         await self._conn.execute("""
             CREATE TABLE IF NOT EXISTS boost_waitlist (
                 user_id INTEGER PRIMARY KEY
             )
         """)
+        
+        # Indexes for performance
+        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id)")
+        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_users_access_role ON users_access(role)")
+        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_concurrency_access_user_id ON concurrency_access(user_id)")
+        
         await self._conn.commit()
 
     async def execute(self, query: str, params: tuple = ()) -> None:

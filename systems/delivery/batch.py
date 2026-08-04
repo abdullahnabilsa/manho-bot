@@ -1,4 +1,4 @@
-# systems/delivery/batch.py
+# File: systems/delivery/batch.py
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +14,7 @@ class BatchManager:
         self._sessions: Dict[int, Tuple[List[PageData], float]] = {}
         self._pending_compiles: Set[int] = set()
         self._session_personas: Dict[int, str] = {}
+        self._session_modes: Dict[int, str] = {}
         self._session_trackers: Dict[int, int] = {}
         self._queued_files: Dict[int, List[str]] = {}
         self._custom_filenames: Dict[int, str] = {}
@@ -31,18 +32,20 @@ class BatchManager:
             del self._sessions[user_id]
             self._pending_compiles.discard(user_id)
             self._session_personas.pop(user_id, None)
+            self._session_modes.pop(user_id, None)
             self._session_trackers.pop(user_id, None)
             self._queued_files.pop(user_id, None)
             self._custom_filenames.pop(user_id, None)
             self._prompt_message_ids.pop(user_id, None)
             self._finalizing_users.discard(user_id)
 
-    async def start_session(self, user_id: int, persona_name: str) -> None:
+    async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
         async with self._lock:
             self._cleanup_stale_sessions()
             if user_id not in self._sessions:
                 self._sessions[user_id] = ([], time.time())
                 self._session_personas[user_id] = persona_name
+                self._session_modes[user_id] = session_mode
                 self._queued_files[user_id] = []
                 self._custom_filenames[user_id] = ""
                 self._prompt_message_ids[user_id] = None
@@ -52,6 +55,11 @@ class BatchManager:
         async with self._lock:
             self._cleanup_stale_sessions()
             return self._session_personas.get(user_id)
+
+    async def get_session_mode(self, user_id: int) -> Optional[str]:
+        async with self._lock:
+            self._cleanup_stale_sessions()
+            return self._session_modes.get(user_id)
 
     async def is_session_active(self, user_id: int) -> bool:
         async with self._lock:
@@ -79,6 +87,7 @@ class BatchManager:
             if user_id in self._sessions:
                 del self._sessions[user_id]
             self._session_personas.pop(user_id, None)
+            self._session_modes.pop(user_id, None)
             self._session_trackers.pop(user_id, None)
             self._queued_files.pop(user_id, None)
             self._custom_filenames.pop(user_id, None)
@@ -96,6 +105,13 @@ class BatchManager:
     async def clear_pending_compile(self, user_id: int) -> None:
         async with self._lock:
             self._pending_compiles.discard(user_id)
+
+    async def try_acquire_compile_lock(self, user_id: int) -> bool:
+        async with self._lock:
+            if user_id in self._finalizing_users:
+                return False
+            self._finalizing_users.add(user_id)
+            return True
 
     async def set_tracker(self, user_id: int, message_id: int) -> None:
         async with self._lock:

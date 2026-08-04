@@ -1,4 +1,4 @@
-# systems/delivery/pipeline.py
+# File: systems/delivery/pipeline.py
 from __future__ import annotations
 
 import asyncio
@@ -14,8 +14,8 @@ from systems.translation_pipeline.registry import PersonaRegistry
 from systems.access_control.api_key_manager import APIKeyManager
 from systems.access_control.user_settings import UserSettingsManager
 from systems.delivery.batch import BatchManager
-from systems.delivery.senders.direct import DirectSender
-from systems.delivery.senders.session import SessionSender
+from systems.delivery.senders.strategies.grouped_session import GroupedSessionStrategy
+from systems.delivery.senders.strategies.individual_session import IndividualSessionStrategy
 from systems.delivery.utils import safe_edit_or_send
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.job_orchestration.contracts import PipelineProtocol
@@ -35,8 +35,8 @@ class DeliveryPipeline:
         api_key_manager: APIKeyManager,
         settings_manager: UserSettingsManager,
         batch_manager: BatchManager,
-        direct_sender: DirectSender,
-        session_sender: SessionSender,
+        grouped_strategy: GroupedSessionStrategy,
+        individual_strategy: IndividualSessionStrategy,
         image_optimizer: Callable[[bytes], bytes],
         queue_manager: AsyncSingleWorkerQueue
     ) -> None:
@@ -46,8 +46,8 @@ class DeliveryPipeline:
         self._api_keys = api_key_manager
         self._settings = settings_manager
         self._batch = batch_manager
-        self._direct_sender = direct_sender
-        self._session_sender = session_sender
+        self._grouped_strategy = grouped_strategy
+        self._individual_strategy = individual_strategy
         self._image_optimizer = image_optimizer
         self._queue = queue_manager
         self._env_settings = Settings()
@@ -56,19 +56,9 @@ class DeliveryPipeline:
         await self._bot.send_chat_action(chat_id=job.chat_id, action=ChatAction.TYPING)
         
         is_session_active = await self._batch.is_session_active(job.user_id)
-        if not is_session_active and job.status_message_id:
-            text = (
-                f"🔍 *جاري التحليل\\.*\n"
-                f"🖼️ الملف: `{escape_markdown_v2(job.file_name)}`\n"
-                f"⏳ _الذكاء الاصطناعي يقرأ الصورة..._"
-            )
-            try:
-                await self._bot.edit_message_text(
-                    chat_id=job.chat_id, message_id=job.status_message_id,
-                    text=text, parse_mode=ParseMode.MARKDOWN_V2
-                )
-            except Exception:
-                pass
+        if not is_session_active:
+            logger.error(f"JobID={job.job_id} | Processing started without an active session. Aborting.")
+            raise RuntimeError("Processing requires an active session.")
 
         if not job.image_bytes and job.image_file_id:
             try:
@@ -128,11 +118,20 @@ class DeliveryPipeline:
         persona_name = await self._settings.get_persona(job.user_id)
         handler = self._personas.get_handler(persona_name)
         
-        if await self._batch.is_session_active(job.user_id):
-            return await self._session_sender.process(job, handler)
+        if not await self._batch.is_session_active(job.user_id):
+            logger.info(f"JobID={job.job_id} | Session expired or cancelled before sending.")
+            return job
+
+        session_mode = await self._batch.get_session_mode(job.user_id)
+        
+        if session_mode == "individual":
+            return await self._individual_strategy.process(job, handler)
         else:
-            return await self._direct_sender.process(job, handler)
+            return await self._grouped_strategy.process(job, handler)
 
     async def compile_session(self, user_id: int, chat_id: int) -> None:
-        """UI-facing method to trigger deferred session compilation."""
-        await self._session_sender.compile_and_send(user_id, chat_id)
+        session_mode = await self._batch.get_session_mode(user_id)
+        if session_mode == "individual":
+            await self._individual_strategy.compile_and_send(user_id, chat_id)
+        else:
+            await self._grouped_strategy.compile_and_send(user_id, chat_id)
