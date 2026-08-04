@@ -47,16 +47,23 @@ class GroupedSessionStrategy:
         total_pages = await self._batch.add_page_data(job.user_id, job.page_data)
         is_pending = await self._batch.is_pending_compile(job.user_id)
         queue_size = await self._queue.size()
+        total_received = await self._batch.get_received_count(job.user_id)
         
-        await self._update_session_tracker(job, total_pages, queue_size, is_pending)
+        processing_count = total_received - total_pages - queue_size
+        if processing_count < 0:
+            processing_count = 0
         
-        if is_pending and queue_size == 0:
+        await self._update_session_tracker(job, total_pages, queue_size, processing_count, total_received, is_pending)
+        
+        if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
                 await self.compile_and_send(job.user_id, job.chat_id)
             
         return job
 
-    async def _update_session_tracker(self, job: PageJob, total_pages: int, queue_size: int, is_pending: bool) -> None:
+    async def _update_session_tracker(
+        self, job: PageJob, total_pages: int, queue_size: int, processing_count: int, total_received: int, is_pending: bool
+    ) -> None:
         await self._concurrency.acquire_tracker_lock(job.user_id)
         try:
             tracker_id = await self._batch.get_tracker(job.user_id)
@@ -73,11 +80,14 @@ class GroupedSessionStrategy:
                 files_text = "\n".join([f"{i}\\. `{name}`" for i, name in enumerate(file_names, start=1)])
             
             if is_pending:
-                if queue_size > 0:
+                if queue_size > 0 or processing_count > 0:
                     text = (
                         f"⏳ *معالجة الصور المتبقية للجلسة...*\n\n"
-                        f"✅ تمت معالجة `{total_pages}` صورة بنجاح\\.\n"
-                        f"📦 يتبقى `{queue_size}` صورة في الطابور\\.\n\n"
+                        f"📊 *إحصائيات الجلسة الحالية:*\n"
+                        f"• إجمالي الصور المرسلة: `{total_received}`\n"
+                        f"• تمت ترجمتها: `{total_pages}`\n"
+                        f"• قيد المعالجة الآن: `{processing_count}`\n"
+                        f"• في الطابور: `{queue_size}`\n\n"
                         f"📄 *الصور المجهزة:*\n{files_text}\n\n"
                         f"_تم استلام اسم الملف\\. جاري معالجة الباقي تلقائياً، يرجى الانتظار..._"
                     )
@@ -87,8 +97,10 @@ class GroupedSessionStrategy:
                 text = (
                     f"✅ *تمت معالجة الصور بنجاح وتخزينها في الجلسة\\.*\n\n"
                     f"📊 *إحصائيات الجلسة الحالية:*\n"
-                    f"• الصور المترجمة: `{total_pages}`\n"
-                    f"• الصور في الطابور: `{queue_size}`\n\n"
+                    f"• إجمالي الصور المرسلة: `{total_received}`\n"
+                    f"• تمت ترجمتها: `{total_pages}`\n"
+                    f"• قيد المعالجة الآن: `{processing_count}`\n"
+                    f"• في الطابور: `{queue_size}`\n\n"
                     f"📄 *الصور المجهزة:*\n{files_text}\n\n"
                     f"_يمكنك متابعة الإرسال، أو اضغط 🔴 إنهاء الجلسة لتجميع الملفات\\._"
                 )

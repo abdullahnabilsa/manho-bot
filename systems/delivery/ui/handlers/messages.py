@@ -65,7 +65,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data['awaiting_session_filename'] = False
         await context.bot.send_message(chat_id=chat_id, text="↩️ *تم إلغاء انتظار الاسم وإضافة الصورة للطابور\\.*", parse_mode=ParseMode.MARKDOWN_V2)
     
-    # NEW: Increment received count immediately to fix stats accuracy
+    # Increment received count immediately to fix stats accuracy
     await batch_manager.increment_received_count(user.id)
     
     queue_size_before = await queue_manager.size()
@@ -110,11 +110,18 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if not tracker_id:
             current_queue = await queue_manager.size()
             translated_count = len(await batch_manager.get_session_data(user.id))
+            total_received = await batch_manager.get_received_count(user.id)
+            processing_count = total_received - translated_count - current_queue
+            if processing_count < 0:
+                processing_count = 0
+                
             text = (
                 f"⏳ *تم استلام الصور وجاري بدء المعالجة...*\n\n"
                 f"📊 *إحصائيات الجلسة الحالية:*\n"
-                f"• الصور المترجمة: `{translated_count}`\n"
-                f"• الصور في الطابور: `{current_queue}`\n\n"
+                f"• إجمالي الصور المرسلة: `{total_received}`\n"
+                f"• تمت ترجمتها: `{translated_count}`\n"
+                f"• قيد المعالجة الآن: `{processing_count}`\n"
+                f"• في الطابور: `{current_queue}`\n\n"
                 f"_يرجى الانتظار، الذكاء الاصطناعي يحلل الصور..._"
             )
             try:
@@ -128,8 +135,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             except Exception:
                 pass
     else:
-        # For individual mode, we just send a typing action. 
-        # The stats message will be created/updated by the IndividualSessionStrategy.
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         except Exception:
