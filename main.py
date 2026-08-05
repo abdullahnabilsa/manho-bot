@@ -220,8 +220,8 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.Regex("🟢 بدء الجلسة"), start_session_command))
     app.add_handler(MessageHandler(filters.Regex("🔴 إنهاء الجلسة"), end_session_command))
     
-    # FIX: Added toggle_ to the regex pattern to catch the glossary toggle button
-    app.add_handler(CallbackQueryHandler(settings_callback, pattern="^(open_|set_|back_|toggle_)"))
+    # FIX: Added add_ and del_ to the regex pattern to catch API key management buttons
+    app.add_handler(CallbackQueryHandler(settings_callback, pattern="^(open_|set_|back_|toggle_|add_|del_)"))
     app.add_handler(CallbackQueryHandler(handle_request_callback, pattern="^(accept_req|reject_req)"))
     
     app.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
