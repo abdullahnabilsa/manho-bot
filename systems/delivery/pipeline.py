@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Callable, List
 
@@ -20,6 +21,7 @@ from systems.delivery.utils import safe_edit_or_send
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.job_orchestration.contracts import PipelineProtocol
 from systems.translation_pipeline.models.page_job import PageJob, MessagePayload
+from systems.glossary.manager import GlossaryManager
 from utils.markdown_escaper import escape_markdown_v2
 
 logger = logging.getLogger(__name__)
@@ -38,7 +40,8 @@ class DeliveryPipeline:
         grouped_strategy: GroupedSessionStrategy,
         individual_strategy: IndividualSessionStrategy,
         image_optimizer: Callable[[bytes], bytes],
-        queue_manager: AsyncSingleWorkerQueue
+        queue_manager: AsyncSingleWorkerQueue,
+        glossary_manager: GlossaryManager
     ) -> None:
         self._bot = bot
         self._ai = ai_provider
@@ -50,6 +53,7 @@ class DeliveryPipeline:
         self._individual_strategy = individual_strategy
         self._image_optimizer = image_optimizer
         self._queue = queue_manager
+        self._glossary = glossary_manager
         self._env_settings = Settings()
 
     async def process(self, job: PageJob) -> PageJob:
@@ -77,6 +81,15 @@ class DeliveryPipeline:
             
         handler = self._personas.get_handler(persona_name)
         prompt_text = handler.prompt
+        
+        user_settings = await self._settings.get_user_settings(job.user_id)
+        use_glossary = user_settings.get("use_glossary", "false") == "true"
+        
+        if use_glossary:
+            glossary_data = await self._glossary.load_glossary()
+            if glossary_data:
+                glossary_str = json.dumps(glossary_data, ensure_ascii=False, indent=2)
+                prompt_text += f"\n\n# GLOSSARY\nYou MUST strictly use the following dictionary for translating the corresponding terms. If a word from the image exists in this glossary, you must use its exact provided translation:\n{glossary_str}\n"
         
         api_keys = await self._api_keys.get_keys_for_user(job.user_id)
         if not api_keys:

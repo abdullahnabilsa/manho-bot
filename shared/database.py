@@ -44,12 +44,17 @@ class Database:
             )
         """)
         
-        # Migration: Add session_mode column if it doesn't exist
         try:
             await self._conn.execute("ALTER TABLE settings ADD COLUMN session_mode TEXT")
             logger.info("Added 'session_mode' column to settings table.")
         except aiosqlite.OperationalError:
-            pass # Column already exists
+            pass
+
+        try:
+            await self._conn.execute("ALTER TABLE settings ADD COLUMN use_glossary TEXT")
+            logger.info("Added 'use_glossary' column to settings table.")
+        except aiosqlite.OperationalError:
+            pass
 
         await self._conn.execute("""
             CREATE TABLE IF NOT EXISTS api_keys (
@@ -76,7 +81,6 @@ class Database:
             )
         """)
         
-        # Indexes for performance
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id)")
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_users_access_role ON users_access(role)")
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_concurrency_access_user_id ON concurrency_access(user_id)")

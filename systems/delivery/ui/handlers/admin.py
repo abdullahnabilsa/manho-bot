@@ -1,9 +1,12 @@
-# systems/delivery/ui/handlers/admin.py
+# File: systems/delivery/ui/handlers/admin.py
 from __future__ import annotations
-from telegram import Update
+import logging
+from telegram import Update, InputFile
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from utils.markdown_escaper import escape_markdown_v2
+
+logger = logging.getLogger(__name__)
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     container = context.bot_data["container"]
@@ -63,3 +66,30 @@ async def remove_public_key_command(update: Update, context: ContextTypes.DEFAUL
         await update.message.reply_text(f"🗑️ *تم الحذف*\nتمت إزالة المفتاح `{masked}` من النظام\\.", parse_mode=ParseMode.MARKDOWN_V2)
     else:
         await update.message.reply_text("⚠️ *غير موجود*\nلا يوجد مفتاح يبدأ بالأحرف التي أدخلتها\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+# NEW: Glossary Commands
+async def upload_dict_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await is_admin(update, context): return
+    context.user_data['awaiting_glossary_upload'] = True
+    await update.message.reply_text(
+        "📚 *رفع قاموس المصطلحات*\n\n"
+        "يرجى إرسال ملف بصيغة `.txt` يحتوي على JSON صالح\\.\n"
+        "التنسيق المطلوب: `{\"كلمة_أجنبية\": \"الترجمة_العربية\"}`\\.\n\n"
+        "⚠️ سيتم استبدال القاموس الحالي بالكامل\\.",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
+
+async def download_dict_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await is_admin(update, context): return
+    container = context.bot_data["container"]
+    file_path = container.glossary.get_file_path()
+    try:
+        with open(file_path, "rb") as f:
+            await update.message.reply_document(
+                document=InputFile(f, filename="glossary.txt"),
+                caption="📥 *قاموس المصطلحات الحالي*\nيمكنك تعديله وإعادة رفعه عبر الأمر `/uploaddict`\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+    except Exception as e:
+        logger.error(f"Failed to send glossary: {e}")
+        await update.message.reply_text("❌ حدث خطأ أثناء محاولة إرسال ملف القاموس\\.", parse_mode=ParseMode.MARKDOWN_V2)

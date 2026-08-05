@@ -20,6 +20,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     output_method = user_settings.get('output_method', 'files_only')
     file_format = user_settings.get('file_format', 'docx')
     session_mode = user_settings.get('session_mode', 'grouped')
+    use_glossary = user_settings.get('use_glossary', 'false')
     
     mode_display = "رسالة موحدة" if mode == "single_message" else "فصل المشاهد"
     if output_method == "chat_and_files":
@@ -27,6 +28,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     output_display = "رسائل وملفات" if output_method == "messages_and_files" else ("رسائل تلجرام فقط" if output_method == "messages_only" else "ملفات فقط")
     file_fmt_escaped = escape_markdown_v2(file_format.upper())
     session_display = "تجميع فردي" if session_mode == "individual" else "تجميع جماعي"
+    glossary_display = "مفصل ❌" if use_glossary == "false" else "مفعل ✅"
     
     text = (
         "⚙️ *لوحة التحكم الرئيسية*\n\n"
@@ -35,12 +37,12 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"📨 *نمط الإرسال:* {escape_markdown_v2(mode_display)}\n"
         f"📤 *طريقة الإخراج:* {escape_markdown_v2(output_display)}\n"
         f"📄 *صيغة الملفات:* {file_fmt_escaped}\n"
-        f"📦 *وضع الجلسة:* {escape_markdown_v2(session_display)}\n\n"
+        f"📦 *وضع الجلسة:* {escape_markdown_v2(session_display)}\n"
+        f"📚 *القاموس:* {escape_markdown_v2(glossary_display)}\n\n"
         "_اضغط على الأزرار أدناه للتعديل_"
     )
     markup = get_settings_dashboard_keyboard(user_settings)
     if update.callback_query:
-        # تم إزالة الاستدعاء المزدوج لـ answer() هنا لمنع تعطل المعالج
         await update.callback_query.edit_message_text(text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=markup)
     else:
         await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=markup)
@@ -76,6 +78,11 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     elif data == "open_session_mode":
         current = (await container.settings.get_user_settings(user_id)).get("session_mode")
         await query.edit_message_text("📦 *وضع الجلسة*\n\nاختر طريقة تجميع ملفات الترجمة عند إرسال الصور:", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_session_mode_keyboard(current))
+    elif data == "toggle_glossary":
+        current = (await container.settings.get_user_settings(user_id)).get("use_glossary", "false")
+        new_val = "true" if current == "false" else "false"
+        await container.settings.set_use_glossary(user_id, new_val)
+        await settings_command(update, context)
     elif data.startswith("set_persona_"):
         await container.settings.set_persona(user_id, data.replace("set_persona_", ""))
         await settings_command(update, context)

@@ -38,17 +38,19 @@ from systems.delivery.senders.strategies.individual_session import IndividualSes
 from systems.delivery.notifier import BotErrorNotifier
 from systems.delivery.pipeline import DeliveryPipeline
 
+from systems.glossary.manager import GlossaryManager
+
 # UI Handlers
 from systems.delivery.ui.handlers.start import start_command, help_command
 from systems.delivery.ui.handlers.settings import settings_command, settings_callback
 from systems.delivery.ui.handlers.session import start_session_command, end_session_command, cancel_command, receive_session_filename
-from systems.delivery.ui.handlers.admin import add_public_key_command, list_public_keys_command, remove_public_key_command
+from systems.delivery.ui.handlers.admin import add_public_key_command, list_public_keys_command, remove_public_key_command, upload_dict_command, download_dict_command
 from systems.delivery.ui.handlers.access import (
     add_user_command, remove_user_command, add_admin_command, remove_admin_command, 
     list_users_command, open_requests_command, close_requests_command, handle_request_callback
 )
 from systems.delivery.ui.handlers.concurrency import boost_command, unboost_command, set_limit_command, grant_parallel_command, revoke_parallel_command
-from systems.delivery.ui.handlers.messages import handle_image, handle_text
+from systems.delivery.ui.handlers.messages import handle_image, handle_text, handle_document
 from systems.delivery.ui.middlewares import state_purge_middleware, session_guard_middleware
 
 settings = Settings()
@@ -108,6 +110,7 @@ async def post_init(app: Application) -> None:
     )
     
     error_notifier = BotErrorNotifier(bot=bot)
+    glossary_manager = GlossaryManager()
     
     delivery_pipeline = DeliveryPipeline(
         bot=bot,
@@ -119,7 +122,8 @@ async def post_init(app: Application) -> None:
         grouped_strategy=grouped_strategy,
         individual_strategy=individual_strategy,
         image_optimizer=optimize_image,
-        queue_manager=queue_manager
+        queue_manager=queue_manager,
+        glossary_manager=glossary_manager
     )
     
     job_manager.attach(
@@ -133,7 +137,8 @@ async def post_init(app: Application) -> None:
         ai=ai_provider, personas=persona_registry,
         queue=queue_manager, jobs=job_manager, concurrency=concurrency_manager,
         batch=batch_manager, renderer=telegram_renderer,
-        delivery=delivery_pipeline, notifier=error_notifier
+        delivery=delivery_pipeline, notifier=error_notifier,
+        glossary=glossary_manager
     )
     app.bot_data["container"] = container
     
@@ -151,6 +156,7 @@ async def post_init(app: Application) -> None:
         BotCommand("removekey", "🗑️ حذف مفتاح API"), BotCommand("adduser", "➕ إضافة مستخدم"),
         BotCommand("removeuser", "🗑️ حذف مستخدم"), BotCommand("listusers", "📋 عرض المستخدمين"),
         BotCommand("openrequests", "🟢 فتح باب الانضمام"), BotCommand("closerequests", "🔴 إغلاق باب الانضمام"),
+        BotCommand("uploaddict", "📚 رفع قاموس المصطلحات"), BotCommand("downloaddict", "📥 تحميل القاموس"),
     ]
     super_admin_commands = admin_commands + [
         BotCommand("addadmin", "👑 ترقية لمشرف"), BotCommand("removeadmin", "📉 إزالة مشرف"),
@@ -194,6 +200,8 @@ def main() -> None:
     app.add_handler(CommandHandler("addkey", add_public_key_command))
     app.add_handler(CommandHandler("listkeys", list_public_keys_command))
     app.add_handler(CommandHandler("removekey", remove_public_key_command))
+    app.add_handler(CommandHandler("uploaddict", upload_dict_command))
+    app.add_handler(CommandHandler("downloaddict", download_dict_command))
     
     app.add_handler(CommandHandler("adduser", add_user_command))
     app.add_handler(CommandHandler("removeuser", remove_user_command))
@@ -214,6 +222,9 @@ def main() -> None:
     
     app.add_handler(CallbackQueryHandler(settings_callback, pattern="^(open_|set_|back_)"))
     app.add_handler(CallbackQueryHandler(handle_request_callback, pattern="^(accept_req|reject_req)"))
+    
+    # NEW: Document handler for .txt files (glossary uploads)
+    app.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))

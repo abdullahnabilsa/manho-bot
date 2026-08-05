@@ -1,4 +1,4 @@
-# shared/container.py
+# File: shared/container.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from systems.delivery.renderers.telegram import TelegramRenderer
     from systems.delivery.pipeline import DeliveryPipeline
     from systems.delivery.notifier import BotErrorNotifier
+    from systems.glossary.manager import GlossaryManager
     from telegram import Bot
 
 @dataclass
@@ -43,3 +44,5 @@ class ServiceContainer:
     renderer: "TelegramRenderer"
     delivery: "DeliveryPipeline"
     notifier: "BotErrorNotifier"
+    
+    glossary: "GlossaryManager"

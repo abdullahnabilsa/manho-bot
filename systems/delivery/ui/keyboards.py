@@ -27,6 +27,8 @@ def get_settings_dashboard_keyboard(user_settings: dict) -> InlineKeyboardMarkup
     fmt = user_settings.get("file_format", "docx").upper()
     session_mode = user_settings.get("session_mode", "grouped")
     session_display = "تجميع فردي" if session_mode == "individual" else "تجميع جماعي"
+    use_glossary = user_settings.get("use_glossary", "false")
+    glossary_display = "مفصل ❌" if use_glossary == "false" else "مفعل ✅"
     
     keyboard = [
         [InlineKeyboardButton(f"🎭 المترجم: {persona}", callback_data="open_personas")],
@@ -34,6 +36,7 @@ def get_settings_dashboard_keyboard(user_settings: dict) -> InlineKeyboardMarkup
         [InlineKeyboardButton(f"📤 الإخراج: {output_display}", callback_data="open_output_method")],
         [InlineKeyboardButton(f"📄 الصيغة: {fmt}", callback_data="open_file_format")],
         [InlineKeyboardButton(f"📦 وضع الجلسة: {session_display}", callback_data="open_session_mode")],
+        [InlineKeyboardButton(f"📚 القاموس: {glossary_display}", callback_data="toggle_glossary")],
         [InlineKeyboardButton("🔐 مفتاح API الخاص", callback_data="open_api_key")],
         [InlineKeyboardButton("🔙 العودة للقائمة الرئيسية", callback_data="back_to_main")]
     ]

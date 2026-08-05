@@ -65,7 +65,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context.user_data['awaiting_session_filename'] = False
         await context.bot.send_message(chat_id=chat_id, text="↩️ *تم إلغاء انتظار الاسم وإضافة الصورة للطابور\\.*", parse_mode=ParseMode.MARKDOWN_V2)
     
-    # Increment received count immediately to fix stats accuracy
     await batch_manager.increment_received_count(user.id)
     
     queue_size_before = await queue_manager.size()
@@ -139,6 +138,30 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         except Exception:
             pass
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if context.user_data.get('awaiting_glossary_upload'):
+        context.user_data['awaiting_glossary_upload'] = False
+        container = context.bot_data["container"]
+        
+        if not update.message.document:
+            await update.message.reply_text("⚠️ يرجى إرسال ملف بصيغة txt\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            return
+            
+        try:
+            tg_file = await update.message.document.get_file()
+            file_bytes = await tg_file.download_as_bytearray()
+            
+            success = await container.glossary.save_glossary(bytes(file_bytes))
+            if success:
+                await update.message.reply_text("✅ *تم تحديث القاموس بنجاح\\!*\nسيتم استخدامه في الترجمات القادمة\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            else:
+                await update.message.reply_text("❌ *فشل التحديث*\nالملف غير صالح أو لا يحتوي على JSON سليم\\. يرجى التحقق من التنسيق\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception as e:
+            logger.error(f"Error uploading glossary: {e}")
+            await update.message.reply_text("❌ حدث خطأ فني أثناء رفع الملف\\.", parse_mode=ParseMode.MARKDOWN_V2)
+    else:
+        await update.message.reply_text("ℹ️ لا يمكنني معالجة هذا الملف حالياً\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_user_api_key'):

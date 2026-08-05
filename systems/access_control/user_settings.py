@@ -16,7 +16,10 @@ class UserSettingsManager:
         if user_id in self._cache:
             return self._cache[user_id]
 
-        row = await self._db.fetchone("SELECT persona, mode, output_method, file_format, session_mode FROM settings WHERE user_id = ?", (user_id,))
+        row = await self._db.fetchone(
+            "SELECT persona, mode, output_method, file_format, session_mode, use_glossary FROM settings WHERE user_id = ?", 
+            (user_id,)
+        )
         
         if row:
             settings = {
@@ -24,7 +27,8 @@ class UserSettingsManager:
                 "mode": row[1] or "scene_split",
                 "output_method": row[2] or "files_only",
                 "file_format": row[3] or "docx",
-                "session_mode": row[4] or "grouped"
+                "session_mode": row[4] or "grouped",
+                "use_glossary": row[5] or "false"
             }
         else:
             settings = {
@@ -32,7 +36,8 @@ class UserSettingsManager:
                 "mode": "scene_split",
                 "output_method": "files_only",
                 "file_format": "docx",
-                "session_mode": "grouped"
+                "session_mode": "grouped",
+                "use_glossary": "false"
             }
         
         self._cache[user_id] = settings
@@ -82,3 +87,12 @@ class UserSettingsManager:
         await self._db.execute("UPDATE settings SET session_mode = ? WHERE user_id = ?", (session_mode, user_id))
         if user_id in self._cache:
             self._cache[user_id]["session_mode"] = session_mode
+
+    async def get_use_glossary(self, user_id: int) -> str:
+        return (await self.get_user_settings(user_id)).get("use_glossary", "false")
+
+    async def set_use_glossary(self, user_id: int, use_glossary: str) -> None:
+        await self._db.execute("INSERT OR IGNORE INTO settings (user_id) VALUES (?)", (user_id,))
+        await self._db.execute("UPDATE settings SET use_glossary = ? WHERE user_id = ?", (use_glossary, user_id))
+        if user_id in self._cache:
+            self._cache[user_id]["use_glossary"] = use_glossary
