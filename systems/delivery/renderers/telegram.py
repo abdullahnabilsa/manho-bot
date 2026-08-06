@@ -13,7 +13,7 @@ from systems.translation_pipeline.models.page_job import JobState, PageJob
 logger = logging.getLogger(__name__)
 
 class TelegramRenderer:
-    SEND_DELAY_SECONDS = 0.3
+    SEND_DELAY_SECONDS = 0.5  # Increased from 0.3 to 0.5 for flood control safety
 
     async def render_messages(self, bot: Bot, job: PageJob, messages: List[str]) -> None:
         if not messages:
@@ -30,7 +30,7 @@ class TelegramRenderer:
                     text=raw_text,
                     parse_mode=ParseMode.MARKDOWN_V2,
                     disable_web_page_preview=True,
-                    reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
+                    reply_to_message_id=job.photo_message_id
                 )
                 if i < total_messages:
                     await asyncio.sleep(self.SEND_DELAY_SECONDS)

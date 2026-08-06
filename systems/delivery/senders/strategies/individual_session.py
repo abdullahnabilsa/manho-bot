@@ -80,6 +80,7 @@ class IndividualSessionStrategy:
                             document=InputFile(file_io, filename=f"{base_filename}.txt"),
                             reply_to_message_id=job.photo_message_id
                         )
+                        await asyncio.sleep(0.5)  # Mandatory delay shield
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
                         file_io.seek(0)
@@ -96,6 +97,7 @@ class IndividualSessionStrategy:
                             document=InputFile(file_io, filename=f"{base_filename}.docx"),
                             reply_to_message_id=job.photo_message_id
                         )
+                        await asyncio.sleep(0.5)  # Mandatory delay shield
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
                         file_io.seek(0)
@@ -110,6 +112,14 @@ class IndividualSessionStrategy:
         return job
 
     async def _update_session_tracker(self, job: PageJob, total_pages: int, queue_size: int, processing_count: int, total_received: int) -> None:
+        is_final_state = (queue_size == 0 and processing_count == 0)
+        
+        if is_final_state:
+            await self._batch.force_update_tracker(job.user_id)
+            
+        if not await self._batch.can_update_tracker(job.user_id):
+            return
+            
         await self._concurrency.acquire_tracker_lock(job.user_id)
         try:
             tracker_id = await self._batch.get_tracker(job.user_id)

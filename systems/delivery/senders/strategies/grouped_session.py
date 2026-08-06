@@ -65,6 +65,14 @@ class GroupedSessionStrategy:
     async def _update_session_tracker(
         self, job: PageJob, total_pages: int, queue_size: int, processing_count: int, total_received: int, is_pending: bool
     ) -> None:
+        is_final_state = (queue_size == 0 and processing_count == 0)
+        
+        if is_final_state:
+            await self._batch.force_update_tracker(job.user_id)
+            
+        if not await self._batch.can_update_tracker(job.user_id):
+            return
+            
         await self._concurrency.acquire_tracker_lock(job.user_id)
         try:
             tracker_id = await self._batch.get_tracker(job.user_id)
@@ -186,7 +194,7 @@ class GroupedSessionStrategy:
                                 chat_id=chat_id, text=msg_text,
                                 parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True
                             )
-                            await asyncio.sleep(0.3)
+                            await asyncio.sleep(0.5)
                         except RetryAfter as e:
                             await asyncio.sleep(e.retry_after)
                             try:
