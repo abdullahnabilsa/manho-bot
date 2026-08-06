@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class ConcurrencyManager:
     """
-    Facade that orchestrates DB checks and in-memory locks.
+    Facade that orchestrates DB checks and in-memory locks/semaphores.
     Communicates limit changes via EventBus to avoid circular dependencies.
     """
     def __init__(self, db_store: ConcurrencyDBStore, event_bus: EventBus) -> None:
@@ -37,7 +37,7 @@ class ConcurrencyManager:
         await self._db_store.revoke_access(user_id)
 
     async def check_user_access(self, user_id: int) -> str:
-        """Public access to user concurrency status (fixes private member access)."""
+        """Public access to user concurrency status."""
         perm = await self._db_store.check_user_access(user_id)
         if perm == "permanent": return "permanent"
         
@@ -49,16 +49,22 @@ class ConcurrencyManager:
     async def acquire_processing_slot(self, user_id: int) -> None:
         access = await self.check_user_access(user_id)
         if access == "none":
-            user_lock = await self._locks.get_user_lock(user_id)
-            await user_lock.acquire()
-            logger.debug(f"User {user_id} acquired sequential processing lock.")
+            sem = await self._locks.get_user_semaphore(user_id)
+            await sem.acquire()
+            logger.debug(f"User {user_id} acquired sequential processing slot.")
+        else:
+            # For permanent or boost users, acquire from their dynamic semaphore
+            sem = await self._locks.get_user_semaphore(user_id)
+            await sem.acquire()
+            logger.debug(f"User {user_id} acquired parallel processing slot.")
 
     async def release_processing_slot(self, user_id: int) -> None:
-        access = await self.check_user_access(user_id)
-        if access == "none":
-            user_lock = await self._locks.get_user_lock(user_id)
-            if user_lock.locked():
-                user_lock.release()
+        sem = await self._locks.get_user_semaphore(user_id)
+        try:
+            sem.release()
+        except ValueError:
+            # Semaphore was replaced (boost ended) — safe to ignore
+            pass
 
     async def acquire_chat_send_lock(self, chat_id: int) -> None:
         chat_lock = await self._locks.get_chat_lock(chat_id)
@@ -78,9 +84,9 @@ class ConcurrencyManager:
         if tracker_lock.locked():
             tracker_lock.release()
 
-    # --- NEW BOOST LOGIC ---
+    # --- BOOST LOGIC ---
 
-    async def request_boost(self, user_id: int, username: str) -> dict:
+    async def request_boost(self, user_id: int, username: str, count: int = 2) -> dict:
         active = await self._db_store.get_active_boost()
         
         if active:
@@ -98,6 +104,8 @@ class ConcurrencyManager:
             else:
                 # The previous boost expired, clean it up and set cooldown
                 await self._db_store.clear_active_boost()
+                await self._locks.reset_user_concurrency(active_user_id)
+                await self._db_store.clear_boost_count(active_user_id)
                 await self._db_store.set_cooldown(active_user_id, time.time() + 60)
         
         cooldown_until = await self._db_store.get_cooldown(user_id)
@@ -108,13 +116,17 @@ class ConcurrencyManager:
             
         expires_at = time.time() + (10 * 60)
         await self._db_store.set_active_boost(user_id, username, expires_at)
-        return {"status": "granted", "expires_at": expires_at}
+        await self._db_store.set_boost_count(user_id, count)
+        await self._locks.set_user_concurrency_limit(user_id, count)
+        return {"status": "granted", "expires_at": expires_at, "count": count}
 
     async def deactivate_boost(self, user_id: int) -> bool:
         active = await self._db_store.get_active_boost()
         if active and active[0] == user_id:
             await self._db_store.clear_active_boost()
             await self._db_store.set_cooldown(user_id, time.time() + 60)
+            await self._locks.reset_user_concurrency(user_id)
+            await self._db_store.clear_boost_count(user_id)
             return True
         return False
 
@@ -137,4 +149,6 @@ class ConcurrencyManager:
             if time.time() >= active[2]:
                 await self._db_store.clear_active_boost()
                 await self._db_store.set_cooldown(user_id, time.time() + 60)
+                await self._locks.reset_user_concurrency(user_id)
+                await self._db_store.clear_boost_count(user_id)
                 await self.check_and_notify_waitlist(bot)

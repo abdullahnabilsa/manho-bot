@@ -1,7 +1,8 @@
-# File: systems/delivery/ui/handlers/messages.py
+# systems/delivery/ui/handlers/messages.py
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from telegram import Update
@@ -12,6 +13,8 @@ from telegram.error import RetryAfter, TelegramError
 from systems.translation_pipeline.models.page_job import PageJob
 from utils.markdown_escaper import escape_markdown_v2
 from systems.job_orchestration.worker import JobSubmissionResult
+
+logger = logging.getLogger(__name__)
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -54,16 +57,28 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             image_file_id = update.message.document.file_id
             file_name = update.message.document.file_name or f"Document_{update.message.message_id}.jpg"
         else:
-            await context.bot.send_message(chat_id=chat_id, text="🚫 *ملف غير مدعوم\\.*\nيرجى إرسال صورة بصيغة JPG أو PNG\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="🚫 *ملف غير مدعوم\\.*\nيرجى إرسال صورة بصيغة JPG أو PNG\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
             return
 
     if not image_file_id:
-        await context.bot.send_message(chat_id=chat_id, text="⚠️ *خطأ في الاستلام\\.*\nلم أتمكن من قراءة الصورة، يرجى إعادة إرسالها\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="⚠️ *خطأ في الاستلام\\.*\nلم أتمكن من قراءة الصورة، يرجى إعادة إرسالها\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
         return
     
     if context.user_data.get('awaiting_session_filename'):
         context.user_data['awaiting_session_filename'] = False
-        await context.bot.send_message(chat_id=chat_id, text="↩️ *تم إلغاء انتظار الاسم وإضافة الصورة للطابور\\.*", parse_mode=ParseMode.MARKDOWN_V2)
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="↩️ *تم إلغاء انتظار الاسم وإضافة الصورة للطابور\\.*",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
     
     await batch_manager.increment_received_count(user.id)
     
@@ -124,7 +139,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 f"_يرجى الانتظار، الذكاء الاصطناعي يحلل الصور..._"
             )
             try:
-                msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
+                msg = await context.bot.send_message(
+                    chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2
+                )
                 await batch_manager.set_tracker(user.id, msg.message_id)
             except Exception:
                 pass
@@ -154,14 +171,26 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             
             success = await container.glossary.save_glossary(bytes(file_bytes))
             if success:
-                await update.message.reply_text("✅ *تم تحديث القاموس بنجاح\\!*\nسيتم استخدامه في الترجمات القادمة\\.", parse_mode=ParseMode.MARKDOWN_V2)
+                await update.message.reply_text(
+                    "✅ *تم تحديث القاموس بنجاح\\!*\nسيتم استخدامه في الترجمات القادمة\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
             else:
-                await update.message.reply_text("❌ *فشل التحديث*\nالملف غير صالح أو لا يحتوي على JSON سليم\\. يرجى التحقق من التنسيق\\.", parse_mode=ParseMode.MARKDOWN_V2)
+                await update.message.reply_text(
+                    "❌ *فشل التحديث*\nالملف غير صالح أو لا يحتوي على JSON سليم\\. يرجى التحقق من التنسيق\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
         except Exception as e:
             logger.error(f"Error uploading glossary: {e}")
-            await update.message.reply_text("❌ حدث خطأ فني أثناء رفع الملف\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            await update.message.reply_text(
+                "❌ حدث خطأ فني أثناء رفع الملف\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
     else:
-        await update.message.reply_text("ℹ️ لا يمكنني معالجة هذا الملف حالياً\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            "ℹ️ لا يمكنني معالجة هذا الملف حالياً\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_user_api_key'):
@@ -170,8 +199,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif context.user_data.get('awaiting_admin_api_key'):
         from systems.delivery.ui.handlers.admin import receive_admin_api_key
         await receive_admin_api_key(update, context)
+    elif context.user_data.get('awaiting_add_user'):
+        from systems.delivery.ui.handlers.access import receive_add_user
+        await receive_add_user(update, context)
     elif context.user_data.get('awaiting_session_filename'):
         from systems.delivery.ui.handlers.session import receive_session_filename
         await receive_session_filename(update, context)
     else:
-        await update.message.reply_text("ℹ️ *مرحباً\\!*\nيرجى إرسال صورة لترجمتها\\.\nاستخدم الأزرار بالأسفل للتحكم في البوت\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            "ℹ️ *مرحباً\\!*\nيرجى إرسال صورة لترجمتها\\.\nاستخدم الأزرار بالأسفل للتحكم في البوت\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )

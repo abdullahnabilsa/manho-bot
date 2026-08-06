@@ -1,6 +1,12 @@
-# File: systems/delivery/ui/keyboards.py
+# systems/delivery/ui/keyboards.py
 from __future__ import annotations
+from typing import List, Tuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+
+
+# ============================================================
+# Persistent & Main Menu Keyboards
+# ============================================================
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -16,6 +22,11 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True
     )
+
+
+# ============================================================
+# Settings Keyboards
+# ============================================================
 
 def get_settings_dashboard_keyboard(user_settings: dict) -> InlineKeyboardMarkup:
     persona = user_settings.get("persona", "Default Translator")
@@ -84,4 +95,140 @@ def get_session_mode_keyboard(current_mode: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ تجميع فردي (ملف لكل صورة)" if current_mode == "individual" else "⬜ تجميع فردي (ملف لكل صورة)", callback_data="set_session_individual")],
         [InlineKeyboardButton("🔙 العودة للإعدادات", callback_data="open_settings")]
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+# ============================================================
+# Dynamic Pagination Engine
+# ============================================================
+
+def build_paginated_keyboard(
+    items: List[Tuple[str, str]],
+    action: str,
+    page: int = 0,
+    items_per_page: int = 8
+) -> InlineKeyboardMarkup:
+    """
+    Build a paginated inline keyboard.
+    
+    Args:
+        items: List of (display_text, target_id) tuples.
+        action: Action prefix for callback_data (e.g., 'access_removeadmin').
+        page: Current page index (0-based).
+        items_per_page: Number of items per page.
+    
+    Returns:
+        InlineKeyboardMarkup with paginated buttons and navigation.
+    """
+    total_items = len(items)
+    total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+    
+    # Clamp page to valid range
+    if page < 0:
+        page = 0
+    elif page >= total_pages:
+        page = total_pages - 1
+    
+    start_idx = page * items_per_page
+    end_idx = start_idx + items_per_page
+    page_items = items[start_idx:end_idx]
+    
+    keyboard = []
+    
+    # Item buttons
+    for display_text, target_id in page_items:
+        keyboard.append([
+            InlineKeyboardButton(
+                display_text,
+                callback_data=f"adm_sel_{action}_{target_id}"
+            )
+        ])
+    
+    # Navigation row
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton("⬅️ السابق", callback_data=f"adm_nav_{action}_{page - 1}")
+        )
+    
+    # Page indicator (non-clickable)
+    if total_pages > 1:
+        nav_buttons.append(
+            InlineKeyboardButton(f"📄 {page + 1}/{total_pages}", callback_data="adm_nopage")
+        )
+    
+    if page < total_pages - 1:
+        nav_buttons.append(
+            InlineKeyboardButton("التالي ➡️", callback_data=f"adm_nav_{action}_{page + 1}")
+        )
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    # Cancel button
+    keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data="adm_cancel")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_confirmation_keyboard(action: str, target_id: str) -> InlineKeyboardMarkup:
+    """
+    Build a double-confirmation keyboard for destructive/sensitive actions.
+    
+    Args:
+        action: Action identifier (e.g., 'access_removeadmin').
+        target_id: Target entity ID.
+    
+    Returns:
+        InlineKeyboardMarkup with confirm/cancel buttons.
+    """
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ تأكيد", callback_data=f"adm_conf_{action}_{target_id}"),
+            InlineKeyboardButton("❌ إلغاء", callback_data="adm_cancel")
+        ]
+    ])
+
+
+def build_boost_keyboard(max_limit: int) -> InlineKeyboardMarkup:
+    """
+    Build a keyboard showing available boost counts (2 to max_limit).
+    
+    Args:
+        max_limit: Global maximum concurrency limit.
+    
+    Returns:
+        InlineKeyboardMarkup with number buttons.
+    """
+    keyboard = []
+    row = []
+    for count in range(2, max_limit + 1):
+        row.append(InlineKeyboardButton(f"{count} ⚡", callback_data=f"boost_req_{count}"))
+        if len(row) == 3:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    
+    keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data="adm_cancel")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_setlimit_keyboard(current_limit: int) -> InlineKeyboardMarkup:
+    """
+    Build a keyboard for super admin to select global concurrency limit (1-5).
+    
+    Args:
+        current_limit: Current global limit.
+    
+    Returns:
+        InlineKeyboardMarkup with number buttons 1-5.
+    """
+    keyboard = []
+    row = []
+    for val in range(1, 6):
+        prefix = "✅ " if val == current_limit else "⬜ "
+        row.append(InlineKeyboardButton(f"{prefix}{val}", callback_data=f"adm_act_setlimit_{val}"))
+    keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data="adm_cancel")])
     return InlineKeyboardMarkup(keyboard)

@@ -9,7 +9,11 @@ from systems.delivery.ui.handlers.session import receive_session_filename
 
 async def state_purge_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_session_filename'):
+        # Allow boost callbacks to pass through during filename await
         if update.callback_query:
+            callback_data = update.callback_query.data or ""
+            if callback_data.startswith("boost_"):
+                return
             await update.callback_query.answer("📝 يرجى إرسال اسم الملف فقط كنص أو /cancel للإلغاء.", show_alert=True)
             raise ApplicationHandlerStop
             
@@ -44,9 +48,10 @@ async def state_purge_middleware(update: Update, context: ContextTypes.DEFAULT_T
     is_persistent_btn = update.message and update.message.text in ["⚙️ الإعدادات", "📖 المساعدة", "🟢 بدء الجلسة", "🔴 إنهاء الجلسة"]
     
     is_system_interaction = is_command or is_callback or is_persistent_btn or is_media
-    if (context.user_data.get('awaiting_admin_api_key') or context.user_data.get('awaiting_user_api_key')) and is_system_interaction:
+    if (context.user_data.get('awaiting_admin_api_key') or context.user_data.get('awaiting_user_api_key') or context.user_data.get('awaiting_add_user')) and is_system_interaction:
         context.user_data['awaiting_admin_api_key'] = False
         context.user_data['awaiting_user_api_key'] = False
+        context.user_data['awaiting_add_user'] = False
 
 async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user:
@@ -62,14 +67,18 @@ async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT
     if update.callback_query and update.callback_query.data.startswith(("accept_req", "reject_req")):
         return
 
+    # Allow boost-related callbacks during active session
     if update.callback_query:
+        callback_data = update.callback_query.data or ""
+        if callback_data.startswith("boost_"):
+            return
         await update.callback_query.answer("🚫 معطل أثناء الجلسة. اضغط 🔴 إنهاء الجلسة للخروج.", show_alert=True)
         raise ApplicationHandlerStop
 
     if update.message and (update.message.photo or (update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith('image/'))):
         return
 
-    if update.message and update.message.text in ["/end_session", "🔴 إنهاء الجلسة", "/cancel", "/start"]:
+    if update.message and update.message.text in ["/end_session", "🔴 إنهاء الجلسة", "/cancel", "/start", "/boost", "/unboost"]:
         return
 
     if update.message:

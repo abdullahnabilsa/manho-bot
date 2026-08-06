@@ -46,7 +46,7 @@ class ConcurrencyDBStore:
         if access_type == 'permanent': return "permanent"
         return "none"
 
-    # --- NEW BOOST LOGIC ---
+    # --- BOOST LOGIC ---
 
     async def get_active_boost(self) -> Optional[Tuple[int, str, float]]:
         """Returns (user_id, username, expires_at) if someone is currently boosting."""
@@ -88,3 +88,21 @@ class ConcurrencyDBStore:
         if rows:
             await self._db.execute("DELETE FROM boost_waitlist")
         return [r[0] for r in rows]
+
+    # --- BOOST COUNT STORAGE ---
+
+    async def set_boost_count(self, user_id: int, count: int) -> None:
+        await self._db.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (f'boost_count_{user_id}', str(count))
+        )
+
+    async def get_boost_count(self, user_id: int) -> Optional[int]:
+        row = await self._db.fetchone(
+            "SELECT value FROM meta WHERE key = ?",
+            (f'boost_count_{user_id}',)
+        )
+        return int(row[0]) if row else None
+
+    async def clear_boost_count(self, user_id: int) -> None:
+        await self._db.execute("DELETE FROM meta WHERE key = ?", (f'boost_count_{user_id}',))

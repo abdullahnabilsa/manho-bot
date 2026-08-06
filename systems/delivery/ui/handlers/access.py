@@ -1,9 +1,20 @@
 # systems/delivery/ui/handlers/access.py
 from __future__ import annotations
+import logging
+from typing import List, Tuple
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
+
 from utils.markdown_escaper import escape_markdown_v2
+from systems.delivery.ui.keyboards import build_paginated_keyboard, build_confirmation_keyboard
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# Command Handlers
+# ============================================================
 
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -13,7 +24,12 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     args = context.args
     if not args or not args[0].isdigit():
-        await update.message.reply_text("⚠️ *الاستخدام غير صحيح*\nالصيغة الصحيحة: `/adduser <ID>`", parse_mode=ParseMode.MARKDOWN_V2)
+        context.user_data['awaiting_add_user'] = True
+        await update.message.reply_text(
+            "➕ *إضافة مستخدم*\n\n"
+            "أرسل الـ ID الرقمي للمستخدم الآن\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
         return
     
     user_id = int(args[0])
@@ -21,9 +37,45 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     added = await container.access.add_user(user_id)
     
     if added:
-        await update.message.reply_text(f"✅ *تمت الإضافة بنجاح*\nتم منح المستخدم `{escaped_id}` صلاحية استخدام البوت\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"✅ *تمت الإضافة بنجاح*\nتم منح المستخدم `{escaped_id}` صلاحية استخدام البوت\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
     else:
-        await update.message.reply_text(f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` موجود مسبقاً في القائمة أو أنه مشرف\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` موجود مسبقاً في القائمة أو أنه مشرف\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+async def receive_add_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data['awaiting_add_user'] = False
+    container = context.bot_data["container"]
+    
+    if not await container.access.is_admin(update.effective_user.id):
+        return
+    
+    text = update.message.text.strip() if update.message.text else ""
+    if not text.isdigit():
+        await update.message.reply_text(
+            "⚠️ *استخدام غير صحيح*\nأرسل ID رقمي صالح\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+        return
+    
+    user_id = int(text)
+    escaped_id = escape_markdown_v2(str(user_id))
+    added = await container.access.add_user(user_id)
+    
+    if added:
+        await update.message.reply_text(
+            f"✅ *تمت الإضافة بنجاح*\nتم منح المستخدم `{escaped_id}` صلاحية استخدام البوت\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+    else:
+        await update.message.reply_text(
+            f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` موجود مسبقاً في القائمة أو أنه مشرف\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
 
 async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -33,7 +85,22 @@ async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     args = context.args
     if not args or not args[0].isdigit():
-        await update.message.reply_text("⚠️ *الاستخدام غير صحيح*\nالصيغة الصحيحة: `/removeuser <ID>`", parse_mode=ParseMode.MARKDOWN_V2)
+        # Show interactive list
+        users = await container.access.get_users()
+        if not users:
+            await update.message.reply_text(
+                "📭 *لا يوجد مستخدمون عاديون بعد*\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+        
+        items = [(f"👤 {uid}", uid) for uid in users]
+        keyboard = build_paginated_keyboard(items, "access_removeuser", page=0)
+        await update.message.reply_text(
+            "🗑️ *حذف مستخدم*\n\nاختر المستخدم من القائمة:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=keyboard
+        )
         return
     
     user_id = int(args[0])
@@ -41,9 +108,15 @@ async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     removed = await container.access.remove_user(user_id)
     
     if removed:
-        await update.message.reply_text(f"🗑️ *تم الحذف بنجاح*\nتم إلغاء صلاحية المستخدم `{escaped_id}`\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"🗑️ *تم الحذف بنجاح*\nتم إلغاء صلاحية المستخدم `{escaped_id}`\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
     else:
-        await update.message.reply_text(f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` غير موجود في قائمة المستخدمين\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` غير موجود في قائمة المستخدمين\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
 
 async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -53,7 +126,22 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     args = context.args
     if not args or not args[0].isdigit():
-        await update.message.reply_text("⚠️ *الاستخدام غير صحيح*\nالصيغة الصحيحة: `/addadmin <ID>`", parse_mode=ParseMode.MARKDOWN_V2)
+        # Show interactive list of regular users
+        users = await container.access.get_users()
+        if not users:
+            await update.message.reply_text(
+                "📭 *لا يوجد مستخدمون عاديون للترقية*\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+        
+        items = [(f"👤 {uid}", uid) for uid in users]
+        keyboard = build_paginated_keyboard(items, "access_addadmin", page=0)
+        await update.message.reply_text(
+            "👑 *ترقية مستخدم لمشرف*\n\nاختر المستخدم من القائمة:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=keyboard
+        )
         return
     
     user_id = int(args[0])
@@ -61,9 +149,15 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     added = await container.access.add_admin(user_id)
     
     if added:
-        await update.message.reply_text(f"👑 *تمت الترقية بنجاح*\nأصبح المستخدم `{escaped_id}` مشرفاً في البوت\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"👑 *تمت الترقية بنجاح*\nأصبح المستخدم `{escaped_id}` مشرفاً في البوت\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
     else:
-        await update.message.reply_text(f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` مشرف مسبقاً أو أنه السوبر أدمن\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` مشرف مسبقاً أو أنه السوبر أدمن\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
 
 async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -73,7 +167,25 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
     
     args = context.args
     if not args or not args[0].isdigit():
-        await update.message.reply_text("⚠️ *الاستخدام غير صحيح*\nالصيغة الصحيحة: `/removeadmin <ID>`", parse_mode=ParseMode.MARKDOWN_V2)
+        # Show interactive list of admins (excluding super admins)
+        admins = await container.access.get_admins()
+        super_admin_ids = container.access._super_admin_ids
+        regular_admins = [a for a in admins if a not in super_admin_ids]
+        
+        if not regular_admins:
+            await update.message.reply_text(
+                "📭 *لا يوجد مشرفون عاديون للحذف*\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            return
+        
+        items = [(f"👑 {uid}", uid) for uid in regular_admins]
+        keyboard = build_paginated_keyboard(items, "access_removeadmin", page=0)
+        await update.message.reply_text(
+            "📉 *إزالة صلاحية مشرف*\n\nاختر المشرف من القائمة:",
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=keyboard
+        )
         return
     
     user_id = int(args[0])
@@ -81,9 +193,15 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
     removed = await container.access.remove_admin(user_id)
     
     if removed:
-        await update.message.reply_text(f"📉 *تمت الإزالة بنجاح*\nتم سحب صلاحية المشرف من `{escaped_id}`\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"📉 *تمت الإزالة بنجاح*\nتم سحب صلاحية المشرف من `{escaped_id}`\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
     else:
-        await update.message.reply_text(f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` ليس مشرفاً أو أنه السوبر أدمن \\(لا يمكن حذفه\\)\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(
+            f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` ليس مشرفاً أو أنه السوبر أدمن \\(لا يمكن حذفه\\)\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
 
 async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -121,7 +239,10 @@ async def open_requests_command(update: Update, context: ContextTypes.DEFAULT_TY
         return
     
     await container.access.set_join_requests(True)
-    await update.message.reply_text("🟢 *تم فتح باب الانضمام\\.*\nأي مستخدم جديد يضغط /start سيتم إرسال طلبه إليك\\.", parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(
+        "🟢 *تم فتح باب الانضمام\\.*\nأي مستخدم جديد يضغط /start سيتم إرسال طلبه إليك\\.",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
 
 async def close_requests_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -130,7 +251,178 @@ async def close_requests_command(update: Update, context: ContextTypes.DEFAULT_T
         return
     
     await container.access.set_join_requests(False)
-    await update.message.reply_text("🔴 *تم إغلاق باب الانضمام\\.*\nلن يستلم البوت أي طلبات جديدة، وسيتم تجاهل المستخدمين الجدد بصمت لتوفير الموارد\\.", parse_mode=ParseMode.MARKDOWN_V2)
+    await update.message.reply_text(
+        "🔴 *تم إغلاق باب الانضمام\\.*\nلن يستلم البوت أي طلبات جديدة، "
+        "وسيتم تجاهل المستخدمين الجدد بصمت لتوفير الموارد\\.",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
+
+
+# ============================================================
+# Interactive Access Callback Handler
+# ============================================================
+
+async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Central router for all adm_(sel|conf|nav)_access_ callbacks."""
+    query = update.callback_query
+    await query.answer()
+    container = context.bot_data["container"]
+    data = query.data or ""
+    
+    # --- SELECTION: Show confirmation ---
+    if data.startswith("adm_sel_access_"):
+        parts = data.replace("adm_sel_access_", "").rsplit("_", 1)
+        if len(parts) != 2:
+            return
+        action, target_id = parts
+        
+        # Verify admin permissions
+        if action in ("addadmin", "removeadmin"):
+            if not container.access.is_super_admin(query.from_user.id):
+                await query.answer("🚫 للسوبر أدمن فقط", show_alert=True)
+                return
+        else:
+            if not await container.access.is_admin(query.from_user.id):
+                await query.answer("🚫 للمشرفين فقط", show_alert=True)
+                return
+        
+        action_labels = {
+            "removeuser": ("🗑️", "حذف المستخدم", f"سيتم حذف المستخدم `{escape_markdown_v2(target_id)}` نهائياً"),
+            "addadmin": ("👑", "ترقية لمشرف", f"سيتم ترقية المستخدم `{escape_markdown_v2(target_id)}` لمشرف"),
+            "removeadmin": ("📉", "إزالة مشرف", f"سيتم سحب صلاحية المشرف من `{escape_markdown_v2(target_id)}`")
+        }
+        
+        if action not in action_labels:
+            return
+        
+        icon, title, desc = action_labels[action]
+        keyboard = build_confirmation_keyboard(f"access_{action}", target_id)
+        await query.edit_message_text(
+            f"{icon} *تأكيد: {escape_markdown_v2(title)}*\n\n"
+            f"⚠️ {desc}\n\n"
+            f"_هل أنت متأكد؟_",
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=keyboard
+        )
+    
+    # --- CONFIRMATION: Execute action ---
+    elif data.startswith("adm_conf_access_"):
+        parts = data.replace("adm_conf_access_", "").rsplit("_", 1)
+        if len(parts) != 2:
+            return
+        action, target_id = parts
+        user_id = int(target_id)
+        escaped_id = escape_markdown_v2(target_id)
+        
+        if action == "removeuser":
+            if not await container.access.is_admin(query.from_user.id):
+                await query.answer("🚫 للمشرفين فقط", show_alert=True)
+                return
+            removed = await container.access.remove_user(user_id)
+            if removed:
+                await query.edit_message_text(
+                    f"✅ *تم الحذف بنجاح*\nتم إلغاء صلاحية المستخدم `{escaped_id}`\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+            else:
+                await query.edit_message_text(
+                    f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` غير موجود\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+        
+        elif action == "addadmin":
+            if not container.access.is_super_admin(query.from_user.id):
+                await query.answer("🚫 للسوبر أدمن فقط", show_alert=True)
+                return
+            added = await container.access.add_admin(user_id)
+            if added:
+                await query.edit_message_text(
+                    f"👑 *تمت الترقية بنجاح*\nأصبح المستخدم `{escaped_id}` مشرفاً\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+            else:
+                await query.edit_message_text(
+                    f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` مشرف مسبقاً\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+        
+        elif action == "removeadmin":
+            if not container.access.is_super_admin(query.from_user.id):
+                await query.answer("🚫 للسوبر أدمن فقط", show_alert=True)
+                return
+            removed = await container.access.remove_admin(user_id)
+            if removed:
+                await query.edit_message_text(
+                    f"📉 *تمت الإزالة بنجاح*\nتم سحب صلاحية المشرف من `{escaped_id}`\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+            else:
+                await query.edit_message_text(
+                    f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` ليس مشرفاً\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+    
+    # --- NAVIGATION: Show next/prev page ---
+    elif data.startswith("adm_nav_access_"):
+        parts = data.replace("adm_nav_access_", "").rsplit("_", 1)
+        if len(parts) != 2:
+            return
+        action, page_str = parts
+        if not page_str.isdigit():
+            return
+        page = int(page_str)
+        
+        # Verify admin permissions
+        if action in ("addadmin", "removeadmin"):
+            if not container.access.is_super_admin(query.from_user.id):
+                await query.answer("🚫 للسوبر أدمن فقط", show_alert=True)
+                return
+        else:
+            if not await container.access.is_admin(query.from_user.id):
+                await query.answer("🚫 للمشرفين فقط", show_alert=True)
+                return
+        
+        await _refresh_access_list(query, container, action, page)
+
+async def _refresh_access_list(query, container, action: str, page: int) -> None:
+    """Helper to refresh the paginated access list."""
+    if action == "addadmin":
+        users = await container.access.get_users()
+        items = [(f"👤 {uid}", uid) for uid in users]
+        title = "👑 *ترقية مستخدم لمشرف*\n\nاختر المستخدم:"
+    elif action == "removeadmin":
+        admins = await container.access.get_admins()
+        super_admin_ids = container.access._super_admin_ids
+        items = [(f"👑 {uid}", uid) for uid in admins if uid not in super_admin_ids]
+        title = "📉 *إزالة صلاحية مشرف*\n\nاختر المشرف:"
+    elif action == "removeuser":
+        users = await container.access.get_users()
+        items = [(f"👤 {uid}", uid) for uid in users]
+        title = "🗑️ *حذف مستخدم*\n\nاختر المستخدم:"
+    else:
+        return
+    
+    if not items:
+        try:
+            await query.edit_message_text("⚠️ لا توجد عناصر لعرضها\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception:
+            pass
+        return
+    
+    keyboard = build_paginated_keyboard(items, f"access_{action}", page=page)
+    try:
+        await query.edit_message_text(
+            title,
+            parse_mode=ParseMode.MARKDOWN_V2,
+            reply_markup=keyboard
+        )
+    except Exception:
+        pass
+
+
+# ============================================================
+# Join Request Callback Handler (unchanged)
+# ============================================================
 
 async def handle_request_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -153,7 +445,10 @@ async def handle_request_callback(update: Update, context: ContextTypes.DEFAULT_
     if not pending_requests:
         await query.answer("تمت معالجة هذا الطلب مسبقاً.", show_alert=True)
         try:
-            await query.edit_message_text(f"ℹ️ *تمت معالجة هذا الطلب مسبقاً\\.*\nالمستخدم `{escaped_user_id}` تمت إضافته أو رفضه\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            await query.edit_message_text(
+                f"ℹ️ *تمت معالجة هذا الطلب مسبقاً\\.*\nالمستخدم `{escaped_user_id}` تمت إضافته أو رفضه\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
         except Exception:
             pass
         return
@@ -185,7 +480,10 @@ async def handle_request_callback(update: Update, context: ContextTypes.DEFAULT_
         
         for adm_id, msg_id in pending_requests:
             try:
-                await context.bot.edit_message_text(chat_id=adm_id, message_id=msg_id, text=new_text, parse_mode=ParseMode.MARKDOWN_V2)
+                await context.bot.edit_message_text(
+                    chat_id=adm_id, message_id=msg_id,
+                    text=new_text, parse_mode=ParseMode.MARKDOWN_V2
+                )
             except Exception:
                 pass
                 
@@ -210,7 +508,10 @@ async def handle_request_callback(update: Update, context: ContextTypes.DEFAULT_
         
         for adm_id, msg_id in pending_requests:
             try:
-                await context.bot.edit_message_text(chat_id=adm_id, message_id=msg_id, text=new_text, parse_mode=ParseMode.MARKDOWN_V2)
+                await context.bot.edit_message_text(
+                    chat_id=adm_id, message_id=msg_id,
+                    text=new_text, parse_mode=ParseMode.MARKDOWN_V2
+                )
             except Exception:
                 pass
                 
