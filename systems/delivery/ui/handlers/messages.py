@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 from datetime import datetime, timezone
 from typing import Optional
 from telegram import Update
@@ -11,7 +12,7 @@ from telegram.constants import ParseMode, ChatAction
 from telegram.error import RetryAfter, TelegramError
 
 from systems.translation_pipeline.models.page_job import PageJob
-from utils.markdown_escaper import escape_markdown_v2
+from utils.markdown_escaper import escape_markdown_v2, escape_html
 from systems.job_orchestration.worker import JobSubmissionResult
 
 logger = logging.getLogger(__name__)
@@ -129,18 +130,25 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if processing_count < 0:
                 processing_count = 0
                 
+            start_time = await batch_manager.get_session_start_time(user.id)
+            elapsed_secs = int(_time.time() - start_time) if start_time else 0
+            hours, rem = divmod(elapsed_secs, 3600)
+            mins, secs = divmod(rem, 60)
+            elapsed_time = f"{hours:02d}:{mins:02d}:{secs:02d}"
+                
             text = (
-                f"⏳ *تم استلام الصور وجاري بدء المعالجة...*\n\n"
-                f"📊 *إحصائيات الجلسة الحالية:*\n"
-                f"• إجمالي الصور المرسلة: `{total_received}`\n"
-                f"• تمت ترجمتها: `{translated_count}`\n"
-                f"• قيد المعالجة الآن: `{processing_count}`\n"
-                f"• في الطابور: `{current_queue}`\n\n"
-                f"_يرجى الانتظار، الذكاء الاصطناعي يحلل الصور..._"
+                f"⏳ <b>تم استلام الصور وجاري بدء المعالجة...</b>\n\n"
+                f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
+                f"• تمت ترجمتها: <code>{translated_count}</code>\n"
+                f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                f"• في الطابور: <code>{current_queue}</code>\n"
+                f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
+                f"<i>يرجى الانتظار، الذكاء الاصطناعي يحلل الصور...</i>"
             )
             try:
                 msg = await context.bot.send_message(
-                    chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2
+                    chat_id=chat_id, text=text, parse_mode=ParseMode.HTML
                 )
                 await batch_manager.set_tracker(user.id, msg.message_id)
             except Exception:

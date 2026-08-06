@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 
 from telegram import Bot, InputFile
 from telegram.constants import ParseMode
@@ -15,7 +16,7 @@ from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.translation_pipeline.registry import PersonaRegistry
 from systems.translation_pipeline.models.page_job import PageJob
-from utils.markdown_escaper import escape_markdown_v2
+from utils.markdown_escaper import escape_markdown_v2, escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -68,48 +69,58 @@ class GroupedSessionStrategy:
         try:
             tracker_id = await self._batch.get_tracker(job.user_id)
             session_data = await self._batch.get_session_data(job.user_id)
+            start_time = await self._batch.get_session_start_time(job.user_id)
             
-            file_names = [escape_markdown_v2(pd.file_name) for pd in session_data if pd and pd.file_name]
+            elapsed_secs = int(_time.time() - start_time) if start_time else 0
+            hours, rem = divmod(elapsed_secs, 3600)
+            mins, secs = divmod(rem, 60)
+            elapsed_time = f"{hours:02d}:{mins:02d}:{secs:02d}"
+            
+            file_names = [escape_html(pd.file_name) for pd in session_data if pd and pd.file_name]
             
             if len(file_names) > 25:
                 start_index = len(file_names) - 10
-                files_text = "_\\.\\.\\. عرض آخر 10 صور_\n" + "\n".join(
-                    [f"{i}\\. `{name}`" for i, name in enumerate(file_names[-10:], start=start_index + 1)]
+                files_text = "… عرض آخر 10 صور\n" + "\n".join(
+                    [f"{i}. {name}" for i, name in enumerate(file_names[-10:], start=start_index + 1)]
                 )
             else:
-                files_text = "\n".join([f"{i}\\. `{name}`" for i, name in enumerate(file_names, start=1)])
+                files_text = "\n".join([f"{i}. {name}" for i, name in enumerate(file_names, start=1)])
+                
+            files_block = f"<blockquote expandable>📄 <b>الصور المجهزة:</b>\n{files_text}</blockquote>"
             
             if is_pending:
                 if queue_size > 0 or processing_count > 0:
                     text = (
-                        f"⏳ *معالجة الصور المتبقية للجلسة...*\n\n"
-                        f"📊 *إحصائيات الجلسة الحالية:*\n"
-                        f"• إجمالي الصور المرسلة: `{total_received}`\n"
-                        f"• تمت ترجمتها: `{total_pages}`\n"
-                        f"• قيد المعالجة الآن: `{processing_count}`\n"
-                        f"• في الطابور: `{queue_size}`\n\n"
-                        f"📄 *الصور المجهزة:*\n{files_text}\n\n"
-                        f"_تم استلام اسم الملف\\. جاري معالجة الباقي تلقائياً، يرجى الانتظار..._"
+                        f"⏳ <b>معالجة الصور المتبقية للجلسة...</b>\n\n"
+                        f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                        f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
+                        f"• تمت ترجمتها: <code>{total_pages}</code>\n"
+                        f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                        f"• في الطابور: <code>{queue_size}</code>\n"
+                        f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
+                        f"{files_block}\n\n"
+                        f"<i>تم استلام اسم الملف. جاري معالجة الباقي تلقائياً، يرجى الانتظار...</i>"
                     )
                 else:
-                    text = "📦 *اكتملت معالجة جميع الصور\\!*\nجاري تجميع الملفات النهائية وإرسالها\\.\\.\\."
+                    text = "📦 <b>اكتملت معالجة جميع الصور!</b>\nجاري تجميع الملفات النهائية وإرسالها..."
             else:
                 text = (
-                    f"✅ *تمت معالجة الصور بنجاح وتخزينها في الجلسة\\.*\n\n"
-                    f"📊 *إحصائيات الجلسة الحالية:*\n"
-                    f"• إجمالي الصور المرسلة: `{total_received}`\n"
-                    f"• تمت ترجمتها: `{total_pages}`\n"
-                    f"• قيد المعالجة الآن: `{processing_count}`\n"
-                    f"• في الطابور: `{queue_size}`\n\n"
-                    f"📄 *الصور المجهزة:*\n{files_text}\n\n"
-                    f"_يمكنك متابعة الإرسال، أو اضغط 🔴 إنهاء الجلسة لتجميع الملفات\\._"
+                    f"✅ <b>تمت معالجة الصور بنجاح وتخزينها في الجلسة.</b>\n\n"
+                    f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                    f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
+                    f"• تمت ترجمتها: <code>{total_pages}</code>\n"
+                    f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                    f"• في الطابور: <code>{queue_size}</code>\n"
+                    f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
+                    f"{files_block}\n\n"
+                    f"<i>يمكنك متابعة الإرسال، أو اضغط 🔴 إنهاء الجلسة لتجميع الملفات.</i>"
                 )
                 
             if tracker_id:
                 try:
                     await self._bot.edit_message_text(
                         chat_id=job.chat_id, message_id=tracker_id,
-                        text=text, parse_mode=ParseMode.MARKDOWN_V2
+                        text=text, parse_mode=ParseMode.HTML
                     )
                     return
                 except BadRequest as e:
@@ -126,7 +137,7 @@ class GroupedSessionStrategy:
                     try:
                         await self._bot.edit_message_text(
                             chat_id=job.chat_id, message_id=tracker_id,
-                            text=text, parse_mode=ParseMode.MARKDOWN_V2
+                            text=text, parse_mode=ParseMode.HTML
                         )
                     except Exception:
                         pass
@@ -137,7 +148,7 @@ class GroupedSessionStrategy:
             if not tracker_id:
                 try:
                     msg = await self._bot.send_message(
-                        chat_id=job.chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2
+                        chat_id=job.chat_id, text=text, parse_mode=ParseMode.HTML
                     )
                     await self._batch.set_tracker(job.user_id, msg.message_id)
                 except Exception as e:

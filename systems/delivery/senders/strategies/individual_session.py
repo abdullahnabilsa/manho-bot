@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 
 from telegram import Bot, InputFile
 from telegram.constants import ParseMode
@@ -15,7 +16,7 @@ from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.translation_pipeline.registry import PersonaRegistry
 from systems.translation_pipeline.models.page_job import PageJob
-from utils.markdown_escaper import escape_markdown_v2
+from utils.markdown_escaper import escape_markdown_v2, escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ class IndividualSessionStrategy:
                         await self._bot.send_document(
                             chat_id=job.chat_id,
                             document=InputFile(file_io, filename=f"{base_filename}.txt"),
-                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
+                            reply_to_message_id=job.photo_message_id
                         )
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
@@ -85,7 +86,7 @@ class IndividualSessionStrategy:
                         await self._bot.send_document(
                             chat_id=job.chat_id,
                             document=InputFile(file_io, filename=f"{base_filename}.txt"),
-                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
+                            reply_to_message_id=job.photo_message_id
                         )
                 if fmt in ["docx", "both"]:
                     file_io = await asyncio.to_thread(handler.generate_docx, [job.page_data])
@@ -93,7 +94,7 @@ class IndividualSessionStrategy:
                         await self._bot.send_document(
                             chat_id=job.chat_id,
                             document=InputFile(file_io, filename=f"{base_filename}.docx"),
-                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
+                            reply_to_message_id=job.photo_message_id
                         )
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
@@ -101,7 +102,7 @@ class IndividualSessionStrategy:
                         await self._bot.send_document(
                             chat_id=job.chat_id,
                             document=InputFile(file_io, filename=f"{base_filename}.docx"),
-                            reply_to_message_id=job.photo_message_id  # <-- الإشارة للصورة الأصلية
+                            reply_to_message_id=job.photo_message_id
                         )
             finally:
                 await self._concurrency.release_chat_send_lock(job.chat_id)
@@ -112,22 +113,29 @@ class IndividualSessionStrategy:
         await self._concurrency.acquire_tracker_lock(job.user_id)
         try:
             tracker_id = await self._batch.get_tracker(job.user_id)
+            start_time = await self._batch.get_session_start_time(job.user_id)
+            
+            elapsed_secs = int(_time.time() - start_time) if start_time else 0
+            hours, rem = divmod(elapsed_secs, 3600)
+            mins, secs = divmod(rem, 60)
+            elapsed_time = f"{hours:02d}:{mins:02d}:{secs:02d}"
             
             text = (
-                f"✅ *تمت معالجة الصور بنجاح وتخزينها في الجلسة\\.*\n\n"
-                f"📊 *إحصائيات الجلسة الحالية:*\n"
-                f"• إجمالي الصور المرسلة: `{total_received}`\n"
-                f"• تمت ترجمتها: `{total_pages}`\n"
-                f"• قيد المعالجة الآن: `{processing_count}`\n"
-                f"• في الطابور: `{queue_size}`\n\n"
-                f"_وضع التجميع الفردي: يتم إرسال ملف الترجمة فور انتهاء كل صورة\\._"
+                f"✅ <b>تمت معالجة الصور بنجاح وتخزينها في الجلسة.</b>\n\n"
+                f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
+                f"• تمت ترجمتها: <code>{total_pages}</code>\n"
+                f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                f"• في الطابور: <code>{queue_size}</code>\n"
+                f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
+                f"<i>وضع التجميع الفردي: يتم إرسال ملف الترجمة فور انتهاء كل صورة.</i>"
             )
                 
             if tracker_id:
                 try:
                     await self._bot.edit_message_text(
                         chat_id=job.chat_id, message_id=tracker_id,
-                        text=text, parse_mode=ParseMode.MARKDOWN_V2
+                        text=text, parse_mode=ParseMode.HTML
                     )
                     return
                 except BadRequest as e:
@@ -144,7 +152,7 @@ class IndividualSessionStrategy:
                     try:
                         await self._bot.edit_message_text(
                             chat_id=job.chat_id, message_id=tracker_id,
-                            text=text, parse_mode=ParseMode.MARKDOWN_V2
+                            text=text, parse_mode=ParseMode.HTML
                         )
                     except Exception:
                         pass
@@ -155,7 +163,7 @@ class IndividualSessionStrategy:
             if not tracker_id:
                 try:
                     msg = await self._bot.send_message(
-                        chat_id=job.chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2
+                        chat_id=job.chat_id, text=text, parse_mode=ParseMode.HTML
                     )
                     await self._batch.set_tracker(job.user_id, msg.message_id)
                 except Exception as e:

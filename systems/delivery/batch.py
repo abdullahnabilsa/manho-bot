@@ -21,8 +21,11 @@ class BatchManager:
         self._prompt_message_ids: Dict[int, int] = {}
         self._finalizing_users: Set[int] = set()
         
-        # NEW: Pre-queue received counter to fix stats accuracy
+        # Pre-queue received counter to fix stats accuracy
         self._received_counts: Dict[int, int] = {}
+        
+        # Session start timestamps for elapsed time tracking
+        self._session_start_times: Dict[int, float] = {}
         
         self._lock = asyncio.Lock()
 
@@ -42,6 +45,7 @@ class BatchManager:
             self._custom_filenames.pop(user_id, None)
             self._prompt_message_ids.pop(user_id, None)
             self._received_counts.pop(user_id, None)
+            self._session_start_times.pop(user_id, None)
             self._finalizing_users.discard(user_id)
 
     async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
@@ -55,6 +59,7 @@ class BatchManager:
                 self._custom_filenames[user_id] = ""
                 self._prompt_message_ids[user_id] = None
                 self._received_counts[user_id] = 0
+                self._session_start_times[user_id] = time.time()
             self._finalizing_users.discard(user_id)
 
     async def get_session_persona(self, user_id: int) -> Optional[str]:
@@ -99,6 +104,7 @@ class BatchManager:
             self._custom_filenames.pop(user_id, None)
             self._prompt_message_ids.pop(user_id, None)
             self._received_counts.pop(user_id, None)
+            self._session_start_times.pop(user_id, None)
             self._finalizing_users.discard(user_id)
 
     async def set_pending_compile(self, user_id: int) -> None:
@@ -120,7 +126,7 @@ class BatchManager:
             self._finalizing_users.add(user_id)
             return True
 
-    async def set_tracker(self, user_id: int, message_id: int) -> None:
+    async def set_tracker(self, user_id: int, message_id: Optional[int]) -> None:
         async with self._lock:
             self._session_trackers[user_id] = message_id
 
@@ -183,3 +189,8 @@ class BatchManager:
     async def is_finalizing(self, user_id: int) -> bool:
         async with self._lock:
             return user_id in self._finalizing_users
+
+    async def get_session_start_time(self, user_id: int) -> Optional[float]:
+        async with self._lock:
+            self._cleanup_stale_sessions()
+            return self._session_start_times.get(user_id)
