@@ -56,7 +56,8 @@ from systems.delivery.ui.handlers.access import (
 )
 from systems.delivery.ui.handlers.concurrency import (
     boost_command, unboost_command, set_limit_command, grant_parallel_command,
-    revoke_parallel_command, handle_boost_callback, handle_setlimit_callback
+    revoke_parallel_command, handle_boost_callback, handle_setlimit_callback,
+    set_boost_limit_command, handle_setboostlimit_callback
 )
 from systems.delivery.ui.handlers.messages import handle_image, handle_text, handle_document
 from systems.delivery.ui.middlewares import state_purge_middleware, session_guard_middleware
@@ -168,7 +169,8 @@ async def post_init(app: Application) -> None:
     ]
     super_admin_commands = admin_commands + [
         BotCommand("addadmin", "👑 ترقية لمشرف"), BotCommand("removeadmin", "📉 إزالة مشرف"),
-        BotCommand("setlimit", "⚙️ تحديد حد المعالجة المتوازية"),
+        BotCommand("setlimit", "⚙️ تحديد الحد العام للمعالجة"),
+        BotCommand("setboostlimit", "🚀 تحديد سقف التعزيز"),
         BotCommand("grantparallel", "✅ منح معالجة متوازية"),
         BotCommand("revokeparallel", "📉 سحب معالجة متوازية")
     ]
@@ -225,6 +227,7 @@ def main() -> None:
     app.add_handler(CommandHandler("addadmin", add_admin_command))
     app.add_handler(CommandHandler("removeadmin", remove_admin_command))
     app.add_handler(CommandHandler("setlimit", set_limit_command))
+    app.add_handler(CommandHandler("setboostlimit", set_boost_limit_command))
     app.add_handler(CommandHandler("grantparallel", grant_parallel_command))
     app.add_handler(CommandHandler("revokeparallel", revoke_parallel_command))
     
@@ -243,6 +246,9 @@ def main() -> None:
     
     # Setlimit callback (super admin)
     app.add_handler(CallbackQueryHandler(handle_setlimit_callback, pattern="^adm_act_setlimit_"))
+    
+    # Setboostlimit callback (super admin)
+    app.add_handler(CallbackQueryHandler(handle_setboostlimit_callback, pattern="^adm_act_setboost_"))
     
     # Interactive access management callbacks
     app.add_handler(CallbackQueryHandler(handle_access_callback, pattern="^adm_(sel|conf|nav)_access_"))

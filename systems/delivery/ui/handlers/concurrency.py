@@ -2,12 +2,13 @@
 from __future__ import annotations
 import asyncio
 import logging
+import time as _time
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
 from utils.markdown_escaper import escape_markdown_v2
-from systems.delivery.ui.keyboards import build_boost_keyboard, build_setlimit_keyboard
+from systems.delivery.ui.keyboards import build_boost_keyboard, build_setlimit_keyboard, build_boost_limit_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +16,11 @@ async def boost_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     container = context.bot_data["container"]
     
-    max_limit = await container.concurrency.get_global_limit()
-    if max_limit <= 1:
+    max_boost_limit = await container.concurrency.get_max_boost_limit()
+    if max_boost_limit <= 1:
         await update.message.reply_text(
             "⚠️ *المعالجة المتوازية غير متاحة حالياً*\n"
-            "الحد الأقصى العالمي مضبوط على `1`\\. انتظر حتى يرفع المشرف الحد\\.",
+            "السوبر أدمن لم يقم بتفعيل سقف التعزيز بعد\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         return
@@ -35,10 +36,8 @@ async def boost_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     
     # Check if already boosting
-    from systems.job_orchestration.concurrency.db_store import ConcurrencyDBStore
     active = await container.concurrency._db_store.get_active_boost()
     if active and active[0] == user.id and active[2] > 0:
-        import time as _time
         if _time.time() < active[2]:
             await update.message.reply_text(
                 "ℹ️ أنت تستخدم المعالجة المتوازية حالياً بالفعل\\.",
@@ -73,11 +72,11 @@ async def boost_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Show boost selection keyboard
     await update.message.reply_text(
         f"🚀 *طلب التعزيز المؤقت*\n\n"
-        f"الحد الأقصى المتاح: `{max_limit}` عمال متوازيين\n"
+        f"الحد الأقصى المتاح للتعزيز: `{max_boost_limit}` عمال متوازيين\n"
         f"اختر عدد العمال المطلوب \\(سيستمر لمدة 10 دقائق\\):\n\n"
         f"⚠️ _لإيقاف التعزيز يدوياً، أرسل `/unboost`_",
         parse_mode=ParseMode.MARKDOWN_V2,
-        reply_markup=build_boost_keyboard(max_limit)
+        reply_markup=build_boost_keyboard(max_boost_limit)
     )
 
 async def handle_boost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -93,9 +92,14 @@ async def handle_boost_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return
     count = int(count_str)
     
-    max_limit = await container.concurrency.get_global_limit()
-    if count < 2 or count > max_limit:
-        await query.answer("⚠️ عدد غير صالح.", show_alert=True)
+    # Strict validation against the current max_boost_limit from DB
+    max_boost_limit = await container.concurrency.get_max_boost_limit()
+    if count < 2 or count > max_boost_limit:
+        await query.edit_message_text(
+            "⚠️ *طلب غير صالح*\n"
+            "تم تجاوز الحد الأقصى المسموح للتعزيز\\. ربما قام المشرف بتخفيض السقف\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
         return
     
     username = f"@{user.username}" if user.username else user.first_name
@@ -159,7 +163,7 @@ async def set_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     current_limit = await container.concurrency.get_global_limit()
     await update.message.reply_text(
-        f"⚙️ *تحديد الحد الأقصى للمعالجة المتوازية*\n\n"
+        f"⚙️ *تحديد الحد الأقصى العام للمعالجة المتوازية*\n\n"
         f"الحد الحالي: `{current_limit}`\n"
         f"اختر الحد الجديد:",
         parse_mode=ParseMode.MARKDOWN_V2,
@@ -187,8 +191,50 @@ async def handle_setlimit_callback(update: Update, context: ContextTypes.DEFAULT
     
     new_limit = await container.concurrency.set_global_limit(value)
     await query.edit_message_text(
-        f"⚙️ *تم تحديث الحد الأقصى للمعالجة المتوازية*\n"
+        f"⚙️ *تم تحديث الحد الأقصى العام للمعالجة المتوازية*\n"
         f"الحد الجديد: `{new_limit}`",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
+
+async def set_boost_limit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    container = context.bot_data["container"]
+    if not container.access.is_super_admin(update.effective_user.id):
+        await update.message.reply_text("🚫 هذا الأمر مخصص للسوبر أدمن فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+    
+    current_limit = await container.concurrency.get_max_boost_limit()
+    await update.message.reply_text(
+        f"🚀 *تحديد سقف التعزيز المؤقت للمستخدمين*\n\n"
+        f"السقف الحالي: `{current_limit}` عمال\n"
+        f"اختر السقف الجديد \\(لن يؤثر على الحد العام\\):",
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=build_boost_limit_keyboard(current_limit)
+    )
+
+async def handle_setboostlimit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    container = context.bot_data["container"]
+    
+    if not container.access.is_super_admin(query.from_user.id):
+        await query.answer("🚫 للسوبر أدمن فقط", show_alert=True)
+        return
+    
+    data = query.data or ""
+    value_str = data.replace("adm_act_setboost_", "")
+    if not value_str.isdigit():
+        return
+    value = int(value_str)
+    
+    if value < 2 or value > 5:
+        await query.answer("⚠️ قيمة غير صالحة.", show_alert=True)
+        return
+    
+    new_limit = await container.concurrency.set_max_boost_limit(value)
+    await query.edit_message_text(
+        f"🚀 *تم تحديث سقف التعزيز المؤقت*\n"
+        f"السقف الجديد: `{new_limit}` عمال متوازيين\n\n"
+        f"_لن يؤثر هذا على الحد العام للنظام\\._",
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
@@ -214,7 +260,7 @@ async def grant_parallel_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(
             f"✅ *تم منح الصلاحية*\n"
             f"المستخدم `{escape_markdown_v2(str(user_id))}` يمتلك الآن معالجة متوازية دائمة\\.\n\n"
-            f"⚠️ *تنبيه هام:* الحد الأقصى الحالي للبوت هو `1`\\. لكي تظهر المعالجة المتوازية للمستخدم، "
+            f"⚠️ *تنبيه هام:* الحد الأقصى العام الحالي للبوت هو `1`\\. لكي تظهر المعالجة المتوازية للمستخدم، "
             f"يجب عليك رفع الحد باستخدام الأمر `/setlimit 2` أو أكثر\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )

@@ -106,3 +106,20 @@ class ConcurrencyDBStore:
 
     async def clear_boost_count(self, user_id: int) -> None:
         await self._db.execute("DELETE FROM meta WHERE key = ?", (f'boost_count_{user_id}',))
+
+    # --- MAX BOOST LIMIT (Decoupled from Global Limit) ---
+
+    async def get_max_boost_limit(self) -> int:
+        row = await self._db.fetchone("SELECT value FROM meta WHERE key = 'max_boost_limit'")
+        if not row:
+            await self.set_max_boost_limit(3)
+            return 3
+        return int(row[0])
+
+    async def set_max_boost_limit(self, limit: int) -> int:
+        limit = max(2, min(5, limit))
+        await self._db.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('max_boost_limit', ?)",
+            (str(limit),)
+        )
+        return limit

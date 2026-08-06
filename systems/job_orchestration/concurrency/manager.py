@@ -152,3 +152,11 @@ class ConcurrencyManager:
                 await self._locks.reset_user_concurrency(user_id)
                 await self._db_store.clear_boost_count(user_id)
                 await self.check_and_notify_waitlist(bot)
+
+    # --- MAX BOOST LIMIT (Decoupled) ---
+
+    async def get_max_boost_limit(self) -> int:
+        return await self._db_store.get_max_boost_limit()
+
+    async def set_max_boost_limit(self, limit: int) -> int:
+        return await self._db_store.set_max_boost_limit(limit)

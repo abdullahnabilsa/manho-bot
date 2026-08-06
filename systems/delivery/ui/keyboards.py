@@ -190,19 +190,19 @@ def build_confirmation_keyboard(action: str, target_id: str) -> InlineKeyboardMa
     ])
 
 
-def build_boost_keyboard(max_limit: int) -> InlineKeyboardMarkup:
+def build_boost_keyboard(max_boost_limit: int) -> InlineKeyboardMarkup:
     """
-    Build a keyboard showing available boost counts (2 to max_limit).
+    Build a keyboard showing available boost counts (2 to max_boost_limit).
     
     Args:
-        max_limit: Global maximum concurrency limit.
+        max_boost_limit: Maximum allowed boost limit (decoupled from global limit).
     
     Returns:
         InlineKeyboardMarkup with number buttons.
     """
     keyboard = []
     row = []
-    for count in range(2, max_limit + 1):
+    for count in range(2, max_boost_limit + 1):
         row.append(InlineKeyboardButton(f"{count} ⚡", callback_data=f"boost_req_{count}"))
         if len(row) == 3:
             keyboard.append(row)
@@ -229,6 +229,26 @@ def build_setlimit_keyboard(current_limit: int) -> InlineKeyboardMarkup:
     for val in range(1, 6):
         prefix = "✅ " if val == current_limit else "⬜ "
         row.append(InlineKeyboardButton(f"{prefix}{val}", callback_data=f"adm_act_setlimit_{val}"))
+    keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data="adm_cancel")])
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_boost_limit_keyboard(current_boost_limit: int) -> InlineKeyboardMarkup:
+    """
+    Build a keyboard for super admin to select max allowed boost limit (2-5).
+    
+    Args:
+        current_boost_limit: Current max boost limit.
+    
+    Returns:
+        InlineKeyboardMarkup with number buttons 2-5.
+    """
+    keyboard = []
+    row = []
+    for val in range(2, 6):
+        prefix = "✅ " if val == current_boost_limit else "⬜ "
+        row.append(InlineKeyboardButton(f"{prefix}{val}", callback_data=f"adm_act_setboost_{val}"))
     keyboard.append(row)
     keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data="adm_cancel")])
     return InlineKeyboardMarkup(keyboard)
