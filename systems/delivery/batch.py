@@ -28,7 +28,7 @@ class BatchManager:
         self._last_tracker_updates: Dict[int, float] = {}
         self._force_update_tracker: Set[int] = set()
         
-        # Local In-Memory Locks (Replaced ConcurrencyManager Locks)
+        # Local In-Memory Locks
         self._tracker_locks: Dict[int, asyncio.Lock] = {}
         self._chat_locks: Dict[int, asyncio.Lock] = {}
         self._locks_creation_lock = asyncio.Lock()
@@ -237,7 +237,7 @@ class BatchManager:
         async with self._lock:
             self._force_update_tracker.add(user_id)
 
-    async def can_update_tracker(self, user_id: int, debounce_sec: float = 1.5) -> bool:
+    async def can_update_tracker(self, user_id: int, debounce_sec: float = 0.8) -> bool:
         """
         Checks if the tracker can be updated based on the debounce time.
         If a force update is requested, it bypasses the check and consumes the flag.

@@ -19,6 +19,8 @@ class JobSubmissionResult(Enum):
     QUEUE_FULL = 2
 
 class JobManager:
+    STATIC_WORKERS_COUNT: int = 5
+
     def __init__(
         self, 
         queue_manager: AsyncSingleWorkerQueue, 
@@ -60,9 +62,10 @@ class JobManager:
 
     async def start(self) -> None:
         if not self._worker_tasks:
-            # Enforce a single sequential worker
-            task = asyncio.create_task(self._worker_loop(1))
-            self._worker_tasks.append(task)
+            for i in range(self.STATIC_WORKERS_COUNT):
+                task = asyncio.create_task(self._worker_loop(i + 1))
+                self._worker_tasks.append(task)
+            logger.info(f"Static Worker Pool initialized with {self.STATIC_WORKERS_COUNT} workers.")
 
     async def stop(self) -> None:
         for task in self._worker_tasks:
