@@ -71,22 +71,22 @@ async def _render_intake_tracker(update: Update, context: ContextTypes.DEFAULT_T
             
         files_block = f"<blockquote expandable>📥 <b>الصور المستلمة ({pending_count}):</b>\n{files_text}</blockquote>"
         
+        note = await batch_manager.get_session_note(user_id)
+        note_html = escape_html(note) if note else ""
+        note_block = f"\n📝 <b>ملاحظة:</b>\n{note_html}\n" if note_html else ""
+        
         start_time = await batch_manager.get_session_start_time(user_id)
         elapsed_secs = int(_time.time() - start_time) if start_time else 0
         hours, rem = divmod(elapsed_secs, 3600)
         mins, secs = divmod(rem, 60)
         elapsed_time = f"{hours:02d}:{mins:02d}:{secs:02d}"
         
-        note = await batch_manager.get_session_note(user_id)
-        note_block = f"📝 <b>الملاحظة:</b>\n<i>{escape_html(note)}</i>\n\n" if note else ""
-        
         text = (
             f"📥 <b>جاري استلام الصور وتجهيزها للجلسة...</b>\n\n"
             f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
-            f"{note_block}"
-            f"{files_block}\n\n"
-            f"<i>عند الانتهاء من إرسال كل الصور، اضغط زر 🔴 إنهاء الجلسة لبدء الترجمة.</i>\n"
-            f"<i>لإضافة ملاحظة للملف، أرسل: /note ملاحظتك هنا</i>"
+            f"{files_block}\n"
+            f"{note_block}\n\n"
+            f"<i>عند الانتهاء من إرسال كل الصور، اضغط زر 🔴 إنهاء الجلسة لبدء الترجمة.</i>"
         )
         
         if tracker_id:

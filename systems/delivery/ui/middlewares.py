@@ -63,10 +63,6 @@ async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT
     if update.callback_query and update.callback_query.data.startswith(("accept_req", "reject_req")):
         return
 
-    # Allow /note command during session
-    if update.message and update.message.text and update.message.text.startswith('/note'):
-        return
-
     if update.callback_query:
         await update.callback_query.answer("🚫 معطل أثناء الجلسة. اضغط 🔴 إنهاء الجلسة للخروج.", show_alert=True)
         raise ApplicationHandlerStop
@@ -74,8 +70,10 @@ async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT
     if update.message and (update.message.photo or (update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith('image/'))):
         return
 
-    if update.message and update.message.text in ["/end_session", "🔴 إنهاء الجلسة", "/cancel", "/start"]:
-        return
+    if update.message and update.message.text:
+        msg_text = update.message.text
+        if msg_text in ["/end_session", "🔴 إنهاء الجلسة", "/cancel", "/start"] or msg_text.startswith("/note"):
+            return
 
     if update.message:
         try:

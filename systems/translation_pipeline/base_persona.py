@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import io
 import os
 import sys
@@ -32,7 +32,7 @@ class BasePersona(ABC):
     async def paginate(self, job: PageJob, mode: str = "scene_split") -> List[str]: pass
 
     @abstractmethod
-    def generate_txt(self, pages: List[PageData]) -> io.BytesIO: pass
+    def generate_txt(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO: pass
 
     @abstractmethod
-    def generate_docx(self, pages: List[PageData]) -> io.BytesIO: pass
+    def generate_docx(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO: pass

@@ -1,10 +1,8 @@
 # File: systems/delivery/ui/handlers/session.py
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode, ChatAction
@@ -12,61 +10,6 @@ from telegram.constants import ParseMode, ChatAction
 from utils.markdown_escaper import escape_markdown_v2, sanitize_filename
 
 logger = logging.getLogger(__name__)
-
-async def _perform_cancel(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE, message_to_delete: Optional[int] = None) -> None:
-    container = context.bot_data["container"]
-    context.user_data['awaiting_session_filename'] = False
-    await container.batch.set_finalizing(user_id, False)
-    
-    tracker_id = await container.batch.get_tracker(user_id)
-    if tracker_id:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=tracker_id)
-        except Exception:
-            pass
-        
-    prompt_msg_id = await container.batch.get_prompt_message_id(user_id)
-    if prompt_msg_id:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=prompt_msg_id)
-        except Exception:
-            pass
-        
-    await container.batch.clear_session(user_id)
-        
-    try:
-        await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء العملية وحذف بيانات الجلسة بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
-    except Exception:
-        pass
-    
-    if message_to_delete:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=message_to_delete)
-        except Exception:
-            pass
-
-async def _initiate_flush(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
-    container = context.bot_data["container"]
-    pending_files = await container.batch.get_pending_files(user_id)
-    text = (
-        "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
-        "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-        f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
-        "• تمت ترجمتها: <code>0</code>\n"
-        "• قيد المعالجة الآن: <code>0</code>\n"
-        "• في الطابور: <code>0</code>\n\n"
-        "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
-    )
-    
-    try:
-        msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-        await container.batch.set_tracker(user_id, msg.message_id)
-        await container.batch.force_update_tracker(user_id)
-    except Exception as e:
-        logger.error(f"Failed to create grouped processing tracker: {e}")
-        
-    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-    await container.delivery.flush_pending_to_queue(user_id, chat_id)
 
 async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -101,24 +44,27 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         text += "⚠️ *في هذا الوضع سيتم إرسال ملف الترجمة فور انتهاء معالجة كل صورة*\\.\n"
         
-    text += "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_\n"
-    text += "📝 _لإضافة ملاحظة تظهر في الملف، أرسل: /note ملاحظتك_"
+    text += "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
     
     await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
 
-async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def set_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     user_id = update.effective_user.id
     
     if not await container.batch.is_session_active(user_id):
-        return
-        
-    note_text = update.message.text.replace('/note', '').strip()
-    if not note_text:
         try:
             await update.message.delete()
         except Exception:
             pass
+        return
+        
+    note_text = update.message.text[len("/note"):].strip()
+    if not note_text:
+        await update.message.reply_text(
+            "⚠️ يرجى كتابة الملاحظة بعد الأمر\\. مثال: `/note هذا الفصل يركز على الحركة`",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
         return
         
     await container.batch.set_session_note(user_id, note_text)
@@ -128,10 +74,11 @@ async def note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         pass
         
-    # Force tracker update to show the note immediately
-    context.user_data['force_new_tracker'] = True
-    from systems.delivery.ui.handlers.messages import _render_intake_tracker
-    await _render_intake_tracker(update, context)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="📝 *تم حفظ ملاحظتك\\.*\nسيتم إظهارها في رسالة الإحصائيات وإضافتها لملف الترجمة\\.",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
 
 async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -193,8 +140,10 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏩ تخطي (اسم تلقائي)", callback_data="skip_filename")],
-        [InlineKeyboardButton("⏹️ إلغاء الجلسة", callback_data="cancel_session_btn")]
+        [
+            InlineKeyboardButton("⏩ تخطي (اسم تلقائي)", callback_data="skip_filename"),
+            InlineKeyboardButton("⏹️ إلغاء الجلسة", callback_data="cancel_session")
+        ]
     ])
     
     try:
@@ -206,7 +155,7 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await container.batch.set_finalizing(user_id, False)
         await update.message.reply_text("⚠️ حدث خطأ فني، يرجى المحاولة مرة أخرى\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
-async def skip_filename_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     container = context.bot_data["container"]
@@ -214,10 +163,18 @@ async def skip_filename_callback(update: Update, context: ContextTypes.DEFAULT_T
     chat_id = query.message.chat_id
     
     if not await container.batch.is_session_active(user_id):
+        await query.edit_message_text("⚠️ الجلسة غير نشطة.")
         return
         
-    default_name = f"Manga_Session_{datetime.now().strftime('%Y-%m-%d_%H-%M')}"
+    default_name = f"Manga_Session_{datetime.now().strftime('%d-%m-%Y')}"
     await container.batch.set_custom_filename(user_id, default_name)
+    
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+        
+    context.user_data['awaiting_session_filename'] = False
     
     prompt_msg_id = await container.batch.get_prompt_message_id(user_id)
     if prompt_msg_id:
@@ -226,21 +183,64 @@ async def skip_filename_callback(update: Update, context: ContextTypes.DEFAULT_T
             await container.batch.set_prompt_message_id(user_id, None)
         except Exception:
             pass
-            
-    context.user_data['awaiting_session_filename'] = False
-    await _initiate_flush(user_id, chat_id, context)
 
-async def cancel_session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pending_files = await container.batch.get_pending_files(user_id)
+    text = (
+        "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
+        "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+        f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
+        "• تمت ترجمتها: <code>0</code>\n"
+        "• قيد المعالجة الآن: <code>0</code>\n"
+        "• في الطابور: <code>0</code>\n\n"
+        "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
+    )
+    
+    try:
+        msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        await container.batch.set_tracker(user_id, msg.message_id)
+        await container.batch.force_update_tracker(user_id)
+    except Exception as e:
+        logger.error(f"Failed to create grouped processing tracker: {e}")
+        
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    
+    await container.delivery.flush_pending_to_queue(user_id, chat_id)
+
+async def handle_cancel_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     container = context.bot_data["container"]
     user_id = query.from_user.id
     chat_id = query.message.chat_id
     
-    if not await container.batch.is_session_active(user_id):
-        return
+    context.user_data['awaiting_session_filename'] = False
+    await container.batch.set_finalizing(user_id, False)
+    
+    tracker_id = await container.batch.get_tracker(user_id)
+    if tracker_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=tracker_id)
+        except Exception:
+            pass
         
-    await _perform_cancel(user_id, chat_id, context)
+    prompt_msg_id = await container.batch.get_prompt_message_id(user_id)
+    if prompt_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prompt_msg_id)
+        except Exception:
+            pass
+        
+    await container.batch.clear_session(user_id)
+        
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+        
+    try:
+        await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء العملية وحذف بيانات الجلسة بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception:
+        pass
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -257,7 +257,34 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             pass
         return
             
-    await _perform_cancel(user_id, chat_id, context, update.message.message_id)
+    context.user_data['awaiting_session_filename'] = False
+    await container.batch.set_finalizing(user_id, False)
+    
+    tracker_id = await container.batch.get_tracker(user_id)
+    if tracker_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=tracker_id)
+        except Exception:
+            pass
+        
+    prompt_msg_id = await container.batch.get_prompt_message_id(user_id)
+    if prompt_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prompt_msg_id)
+        except Exception:
+            pass
+        
+    await container.batch.clear_session(user_id)
+        
+    try:
+        await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء العملية وحذف بيانات الجلسة بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception:
+        pass
+    
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
 
 async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -268,6 +295,7 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
     
     raw_filename = update.message.text
     clean_filename = sanitize_filename(raw_filename)
+    escaped_filename = escape_markdown_v2(clean_filename)
     
     await container.batch.set_custom_filename(user_id, clean_filename)
     
@@ -284,31 +312,53 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
         except Exception:
             pass
 
-    await _initiate_flush(user_id, chat_id, context)
+    pending_files = await container.batch.get_pending_files(user_id)
+    text = (
+        "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
+        "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+        f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
+        "• تمت ترجمتها: <code>0</code>\n"
+        "• قيد المعالجة الآن: <code>0</code>\n"
+        "• في الطابور: <code>0</code>\n\n"
+        "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
+    )
+    
+    try:
+        msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        await container.batch.set_tracker(user_id, msg.message_id)
+        await container.batch.force_update_tracker(user_id)
+    except Exception as e:
+        logger.error(f"Failed to create grouped processing tracker: {e}")
+        
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    
+    await container.delivery.flush_pending_to_queue(user_id, chat_id)
 
 async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Phase 3: Cleanup Engine - Deletes original photos in bulk."""
     query = update.callback_query
+    await query.answer("جاري تنظيف الشات...", show_alert=False)
     container = context.bot_data["container"]
     user_id = query.from_user.id
     chat_id = query.message.chat_id
     
-    await query.answer("جاري تنظيف الشات...", show_alert=False)
-    
     photo_ids = await container.batch.get_session_photo_ids(user_id)
-    
-    deleted_count = 0
-    for msg_id in photo_ids:
+    if not photo_ids:
         try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-            deleted_count += 1
-            await asyncio.sleep(0.05)  # slight delay to avoid flood
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+        return
+        
+    # Telegram delete_messages supports up to 100 per call
+    for i in range(0, len(photo_ids), 100):
+        chunk = photo_ids[i:i+100]
+        try:
+            await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
+        except Exception as e:
+            logger.warning(f"Failed to delete some messages: {e}")
             
     try:
-        await context.bot.edit_message_reply_markup(
-            chat_id=chat_id, message_id=query.message.message_id, reply_markup=None
-        )
-        await query.answer(f"تم حذف {deleted_count} صورة.", show_alert=True)
+        await query.edit_message_reply_markup(reply_markup=None)
     except Exception:
         pass

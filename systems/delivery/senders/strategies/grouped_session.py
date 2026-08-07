@@ -16,16 +16,9 @@ from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.translation_pipeline.registry import PersonaRegistry
 from systems.translation_pipeline.models.page_job import PageJob
 from utils.markdown_escaper import escape_markdown_v2, escape_html
+from utils.progress_bar import generate_progress_bar
 
 logger = logging.getLogger(__name__)
-
-def _generate_progress_bar(processed: int, total: int) -> str:
-    if total == 0:
-        return "[░░░░░░░░░░] 0%"
-    percentage = min(100, int((processed / total) * 100))
-    filled_blocks = int(percentage / 10)
-    empty_blocks = 10 - filled_blocks
-    return f"[{'█' * filled_blocks}{'░' * empty_blocks}] {percentage}%"
 
 class GroupedSessionStrategy:
     def __init__(
@@ -50,16 +43,16 @@ class GroupedSessionStrategy:
             logger.info(f"JobID={job.job_id} | User cancelled the session. Dropping queued job silently.")
             return job
 
-        processed_pages = await self._batch.add_page_data(job.user_id, job.page_data)
+        total_pages = await self._batch.add_page_data(job.user_id, job.page_data)
         is_pending = await self._batch.is_pending_compile(job.user_id)
         queue_size = await self._queue.size()
         total_received = await self._batch.get_received_count(job.user_id)
         
-        processing_count = total_received - processed_pages - queue_size
+        processing_count = total_received - total_pages - queue_size
         if processing_count < 0:
             processing_count = 0
         
-        await self._update_session_tracker(job, processed_pages, queue_size, processing_count, total_received, is_pending)
+        await self._update_session_tracker(job, total_pages, queue_size, processing_count, total_received, is_pending)
         
         if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
@@ -76,7 +69,7 @@ class GroupedSessionStrategy:
         return job
 
     async def _update_session_tracker(
-        self, job: PageJob, processed_pages: int, queue_size: int, processing_count: int, total_received: int, is_pending: bool
+        self, job: PageJob, total_pages: int, queue_size: int, processing_count: int, total_received: int, is_pending: bool
     ) -> None:
         is_final_state = (queue_size == 0 and processing_count == 0)
         
@@ -109,27 +102,24 @@ class GroupedSessionStrategy:
                 
             files_block = f"<blockquote expandable>📄 <b>الصور المجهزة:</b>\n{files_text}</blockquote>"
             
-            progress_bar = _generate_progress_bar(processed_pages, total_received)
-            
+            progress_bar = generate_progress_bar(total_pages, total_received)
             note = await self._batch.get_session_note(job.user_id)
-            note_block = f"📝 <b>الملاحظة:</b>\n<i>{escape_html(note)}</i>\n\n" if note else ""
+            note_html = escape_html(note) if note else ""
+            note_block = f"\n📝 <b>ملاحظة:</b>\n{note_html}\n" if note_html else ""
             
             if is_pending:
-                status_text = "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>"
-                if is_final_state:
-                    status_text = "✅ <b>تمت معالجة جميع الصور بنجاح!</b>"
-                    
+                # Preserve the 100% stats, do not overwrite with "compiling" text
                 text = (
                     f"{progress_bar}\n\n"
-                    f"{status_text}\n\n"
+                    f"⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
                     f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
                     f"• إجمالي الصور: <code>{total_received}</code>\n"
-                    f"• تمت ترجمتها: <code>{processed_pages}</code>\n"
+                    f"• تمت ترجمتها: <code>{total_pages}</code>\n"
                     f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
                     f"• في الطابور: <code>{queue_size}</code>\n"
                     f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
-                    f"{note_block}"
-                    f"{files_block}\n\n"
+                    f"{files_block}\n"
+                    f"{note_block}\n\n"
                     f"<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
                 )
             else:
@@ -138,12 +128,12 @@ class GroupedSessionStrategy:
                     f"✅ <b>تمت معالجة الصور بنجاح وتخزينها في الجلسة.</b>\n\n"
                     f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
                     f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
-                    f"• تمت ترجمتها: <code>{processed_pages}</code>\n"
+                    f"• تمت ترجمتها: <code>{total_pages}</code>\n"
                     f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
                     f"• في الطابور: <code>{queue_size}</code>\n"
                     f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
-                    f"{note_block}"
-                    f"{files_block}\n\n"
+                    f"{files_block}\n"
+                    f"{note_block}\n\n"
                     f"<i>يمكنك متابعة الإرسال، أو اضغط 🔴 إنهاء الجلسة لتجميع الملفات.</i>"
                 )
                 
@@ -195,6 +185,7 @@ class GroupedSessionStrategy:
 
         custom_name = await self._batch.get_custom_filename(user_id)
         base_filename = custom_name if custom_name else "manga_session"
+        session_note = await self._batch.get_session_note(user_id)
         
         user_settings = await self._settings.get_user_settings(user_id)
         output_method = user_settings.get("output_method", "files_only")
@@ -205,8 +196,6 @@ class GroupedSessionStrategy:
         
         persona_name = await self._batch.get_session_persona(user_id)
         handler = self._personas.get_handler(persona_name)
-        
-        note = await self._batch.get_session_note(user_id) or None
 
         try:
             if output_method == "messages_only":
@@ -233,7 +222,7 @@ class GroupedSessionStrategy:
                 await self._batch.acquire_chat_send_lock(chat_id)
                 try:
                     if fmt in ["txt", "both"]:
-                        file_io = await asyncio.to_thread(handler.generate_txt, session_data, note)
+                        file_io = await asyncio.to_thread(handler.generate_txt, session_data, session_note)
                         try:
                             await self._bot.send_document(
                                 chat_id=chat_id,
@@ -248,7 +237,7 @@ class GroupedSessionStrategy:
                             )
 
                     if fmt in ["docx", "both"]:
-                        file_io = await asyncio.to_thread(handler.generate_docx, session_data, note)
+                        file_io = await asyncio.to_thread(handler.generate_docx, session_data, session_note)
                         try:
                             await self._bot.send_document(
                                 chat_id=chat_id,
@@ -277,34 +266,28 @@ class GroupedSessionStrategy:
                 except Exception:
                     pass
 
-            # Persistent Session Log
+            # Phase 3: Persistent Log & Cleanup Engine
             tracker_id = await self._batch.get_tracker(user_id)
-            total_images = len(session_data)
-            start_time = await self._batch.get_session_start_time(user_id)
-            elapsed_secs = int(_time.time() - start_time) if start_time else 0
-            hours, rem = divmod(elapsed_secs, 3600)
-            mins, secs = divmod(rem, 60)
-            elapsed_time = f"{hours:02d}:{mins:02d}:{secs:02d}"
-            
-            log_text = (
-                f"✅ <b>اكتملت الجلسة</b>\n"
-                f"📄 <b>الاسم:</b> <code>{escape_html(base_filename)}</code>\n"
-                f"🖼️ <b>عدد الصور:</b> <code>{total_images}</code>\n"
-                f"⏱️ <b>الوقت المستغرق:</b> <code>{elapsed_time}</code>\n"
-            )
-            if note:
-                log_text += f"📝 <b>الملاحظة:</b>\n<i>{escape_html(note)}</i>\n"
-                
-            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🗑️ حذف الصور الأصلية", callback_data="cleanup_photos")]])
-            
             if tracker_id:
                 try:
+                    note_html = escape_html(session_note) if session_note else "لا يوجد"
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🗑️ حذف الصور الأصلية", callback_data="cleanup_photos")]
+                    ])
                     await self._bot.edit_message_text(
-                        chat_id=chat_id, message_id=tracker_id,
-                        text=log_text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+                        chat_id=chat_id,
+                        message_id=tracker_id,
+                        text=(
+                            f"✅ <b>اكتملت الجلسة بنجاح!</b>\n\n"
+                            f"📄 <b>اسم الملف:</b> <code>{escape_html(base_filename)}</code>\n"
+                            f"🖼️ <b>عدد الصور:</b> <code>{len(session_data)}</code>\n"
+                            f"📝 <b>الملاحظة:</b>\n{note_html}\n"
+                        ),
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=keyboard
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Failed to edit tracker to persistent log: {e}")
                 
         except Exception as e:
             logger.error(f"Failed to process deferred compile: {e}")

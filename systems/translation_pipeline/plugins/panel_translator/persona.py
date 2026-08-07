@@ -245,7 +245,8 @@ class PanelPersona(BasePersona):
         
         if session_note:
             buffer.write("═" * 60 + "\n")
-            buffer.write(f"  📝 ملاحظات الجلسة:\n  {session_note}\n")
+            buffer.write("  📝 ملاحظة الجلسة:\n")
+            buffer.write(f"  {session_note}\n")
             buffer.write("═" * 60 + "\n\n")
         
         for page_idx, page_data in enumerate(pages, 1):
@@ -292,10 +293,10 @@ class PanelPersona(BasePersona):
 
         if session_note:
             p_note = doc.add_paragraph()
-            run_note = p_note.add_run(f"📝 ملاحظات الجلسة:\n{session_note}")
+            run_note = p_note.add_run(f"📝 ملاحظة الجلسة: {session_note}")
             run_note.italic = True
-            run_note.font.size = Pt(10)
-            run_note.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+            run_note.font.size = Pt(12)
+            run_note.font.color.rgb = RGBColor(0x00, 0x70, 0xC0)
             doc.add_paragraph()
 
         for page_idx, page_data in enumerate(pages, 1):

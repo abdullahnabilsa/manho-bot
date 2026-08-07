@@ -43,7 +43,7 @@ from systems.delivery.ui.handlers.start import start_command, help_command
 from systems.delivery.ui.handlers.settings import settings_command, settings_callback
 from systems.delivery.ui.handlers.session import (
     start_session_command, end_session_command, cancel_command, receive_session_filename,
-    note_command, skip_filename_callback, cancel_session_callback, handle_cleanup_photos_callback
+    set_note_command, handle_skip_filename, handle_cancel_session, handle_cleanup_photos_callback
 )
 from systems.delivery.ui.handlers.admin import (
     add_public_key_command, list_public_keys_command, remove_public_key_command,
@@ -189,7 +189,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start_session", start_session_command))
     app.add_handler(CommandHandler("end_session", end_session_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
-    app.add_handler(CommandHandler("note", note_command))
+    app.add_handler(CommandHandler("note", set_note_command))
     
     # Admin commands
     app.add_handler(CommandHandler("addkey", add_public_key_command))
@@ -216,11 +216,6 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.Regex("🔴 إنهاء الجلسة"), end_session_command))
     
     # Callback query handlers (ordered by specificity)
-    # Session UX callbacks
-    app.add_handler(CallbackQueryHandler(skip_filename_callback, pattern="^skip_filename$"))
-    app.add_handler(CallbackQueryHandler(cancel_session_callback, pattern="^cancel_session_btn$"))
-    app.add_handler(CallbackQueryHandler(handle_cleanup_photos_callback, pattern="^cleanup_photos$"))
-    
     # Settings callbacks
     app.add_handler(CallbackQueryHandler(settings_callback, pattern="^(open_|set_|back_|toggle_|add_|del_)"))
     
@@ -229,6 +224,11 @@ def main() -> None:
     
     # Interactive API key management callbacks
     app.add_handler(CallbackQueryHandler(handle_apikey_callback, pattern="^adm_(sel|conf|nav)_apikey_"))
+    
+    # Session callbacks
+    app.add_handler(CallbackQueryHandler(handle_skip_filename, pattern="^skip_filename$"))
+    app.add_handler(CallbackQueryHandler(handle_cancel_session, pattern="^cancel_session$"))
+    app.add_handler(CallbackQueryHandler(handle_cleanup_photos_callback, pattern="^cleanup_photos$"))
     
     # Admin cancel (dismiss interactive panel)
     app.add_handler(CallbackQueryHandler(handle_admin_cancel, pattern="^adm_cancel$"))

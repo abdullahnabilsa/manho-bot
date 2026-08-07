@@ -27,7 +27,7 @@ class BatchManager:
         # Intake & Caching Engine
         self._pending_file_ids: Dict[int, List[Tuple[str, str, int]]] = {}
         
-        # UX Enhancements: Notes & Photo IDs
+        # Smart Intake Data
         self._session_notes: Dict[int, str] = {}
         self._session_photo_ids: Dict[int, List[int]] = {}
         
@@ -67,9 +67,9 @@ class BatchManager:
             self._force_update_tracker.discard(user_id)
             self._finalizing_users.discard(user_id)
             self._pending_file_ids.pop(user_id, None)
-            self._compile_locks.discard(user_id)
             self._session_notes.pop(user_id, None)
             self._session_photo_ids.pop(user_id, None)
+            self._compile_locks.discard(user_id)
 
     async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
         async with self._lock:
@@ -137,9 +137,9 @@ class BatchManager:
             self._finalizing_users.discard(user_id)
             self._pending_compiles.discard(user_id)
             self._pending_file_ids.pop(user_id, None)
-            self._compile_locks.discard(user_id)
             self._session_notes.pop(user_id, None)
             self._session_photo_ids.pop(user_id, None)
+            self._compile_locks.discard(user_id)
             self._received_counts.pop(user_id, None)
 
     async def set_pending_compile(self, user_id: int) -> None:
@@ -298,7 +298,7 @@ class BatchManager:
         async with self._lock:
             self._pending_file_ids[user_id] = []
 
-    # --- UX ENHANCEMENTS: NOTES & PHOTO IDS ---
+    # --- SMART INTAKE DATA ---
 
     async def set_session_note(self, user_id: int, note: str) -> None:
         async with self._lock:
