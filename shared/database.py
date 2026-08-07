@@ -68,22 +68,9 @@ class Database:
                 value TEXT
             )
         """)
-        await self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS concurrency_access (
-                user_id INTEGER PRIMARY KEY,
-                access_type TEXT NOT NULL,
-                expires_at REAL
-            )
-        """)
-        await self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS boost_waitlist (
-                user_id INTEGER PRIMARY KEY
-            )
-        """)
         
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id)")
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_users_access_role ON users_access(role)")
-        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_concurrency_access_user_id ON concurrency_access(user_id)")
         
         await self._conn.commit()
 

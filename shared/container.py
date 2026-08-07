@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from systems.translation_pipeline.registry import PersonaRegistry
     from systems.job_orchestration.queue import AsyncSingleWorkerQueue
     from systems.job_orchestration.worker import JobManager
-    from systems.job_orchestration.concurrency.manager import ConcurrencyManager
     from systems.delivery.batch import BatchManager
     from systems.delivery.renderers.telegram import TelegramRenderer
     from systems.delivery.pipeline import DeliveryPipeline
@@ -38,7 +37,6 @@ class ServiceContainer:
     
     queue: "AsyncSingleWorkerQueue"
     jobs: "JobManager"
-    concurrency: "ConcurrencyManager"
     
     batch: "BatchManager"
     renderer: "TelegramRenderer"

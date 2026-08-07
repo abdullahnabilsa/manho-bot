@@ -9,11 +9,7 @@ from systems.delivery.ui.handlers.session import receive_session_filename
 
 async def state_purge_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_session_filename'):
-        # Allow boost callbacks to pass through during filename await
         if update.callback_query:
-            callback_data = update.callback_query.data or ""
-            if callback_data.startswith("boost_"):
-                return
             await update.callback_query.answer("📝 يرجى إرسال اسم الملف فقط كنص أو /cancel للإلغاء.", show_alert=True)
             raise ApplicationHandlerStop
             
@@ -67,18 +63,14 @@ async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT
     if update.callback_query and update.callback_query.data.startswith(("accept_req", "reject_req")):
         return
 
-    # Allow boost-related callbacks during active session
     if update.callback_query:
-        callback_data = update.callback_query.data or ""
-        if callback_data.startswith("boost_"):
-            return
         await update.callback_query.answer("🚫 معطل أثناء الجلسة. اضغط 🔴 إنهاء الجلسة للخروج.", show_alert=True)
         raise ApplicationHandlerStop
 
     if update.message and (update.message.photo or (update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith('image/'))):
         return
 
-    if update.message and update.message.text in ["/end_session", "🔴 إنهاء الجلسة", "/cancel", "/start", "/boost", "/unboost"]:
+    if update.message and update.message.text in ["/end_session", "🔴 إنهاء الجلسة", "/cancel", "/start"]:
         return
 
     if update.message:

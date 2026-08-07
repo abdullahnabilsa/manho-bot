@@ -28,8 +28,6 @@ from systems.translation_pipeline.registry import PersonaRegistry
 
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.job_orchestration.worker import JobManager
-from systems.job_orchestration.concurrency.db_store import ConcurrencyDBStore
-from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 
 from systems.delivery.batch import BatchManager
 from systems.delivery.renderers.telegram import TelegramRenderer
@@ -53,11 +51,6 @@ from systems.delivery.ui.handlers.access import (
     add_user_command, remove_user_command, add_admin_command, remove_admin_command, 
     list_users_command, open_requests_command, close_requests_command,
     handle_request_callback, handle_access_callback
-)
-from systems.delivery.ui.handlers.concurrency import (
-    boost_command, unboost_command, set_limit_command, grant_parallel_command,
-    revoke_parallel_command, handle_boost_callback, handle_setlimit_callback,
-    set_boost_limit_command, handle_setboostlimit_callback
 )
 from systems.delivery.ui.handlers.messages import handle_image, handle_text, handle_document
 from systems.delivery.ui.middlewares import state_purge_middleware, session_guard_middleware
@@ -90,32 +83,23 @@ async def post_init(app: Application) -> None:
     persona_registry = PersonaRegistry(plugins_dir="systems/translation_pipeline/plugins")
     
     queue_manager = AsyncSingleWorkerQueue(max_size=settings.queue_max_size)
-    concurrency_db_store = ConcurrencyDBStore(db=db)
-    concurrency_manager = ConcurrencyManager(db_store=concurrency_db_store, event_bus=event_bus)
     
-    max_workers = await concurrency_manager.get_global_limit()
     job_manager = JobManager(
         queue_manager=queue_manager, 
-        concurrency_manager=concurrency_manager, 
-        max_running_jobs=max_workers, 
         post_job_delay=settings.post_job_delay_seconds
     )
-    
-    event_bus.subscribe("concurrency.limit_changed", job_manager.scale_workers)
     
     batch_manager = BatchManager()
     telegram_renderer = TelegramRenderer()
     
     grouped_strategy = GroupedSessionStrategy(
         bot=bot, batch=batch_manager, settings=settings_manager,
-        concurrency=concurrency_manager, personas=persona_registry,
-        queue=queue_manager, renderer=telegram_renderer
+        personas=persona_registry, queue=queue_manager, renderer=telegram_renderer
     )
     
     individual_strategy = IndividualSessionStrategy(
         bot=bot, batch=batch_manager, settings=settings_manager,
-        concurrency=concurrency_manager, personas=persona_registry,
-        queue=queue_manager, renderer=telegram_renderer
+        personas=persona_registry, queue=queue_manager, renderer=telegram_renderer
     )
     
     error_notifier = BotErrorNotifier(bot=bot)
@@ -144,7 +128,7 @@ async def post_init(app: Application) -> None:
         db=db, bot=bot, event_bus=event_bus,
         access=access_manager, api_keys=api_key_manager, settings=settings_manager,
         ai=ai_provider, personas=persona_registry,
-        queue=queue_manager, jobs=job_manager, concurrency=concurrency_manager,
+        queue=queue_manager, jobs=job_manager,
         batch=batch_manager, renderer=telegram_renderer,
         delivery=delivery_pipeline, notifier=error_notifier,
         glossary=glossary_manager
@@ -154,9 +138,7 @@ async def post_init(app: Application) -> None:
     public_commands = [
         BotCommand("start", "بدء استخدام البوت"), BotCommand("settings", "فتح الإعدادات"),
         BotCommand("help", "دليل الاستخدام"), BotCommand("start_session", "بدء الجلسة"),
-        BotCommand("end_session", "إنهاء الجلسة"), BotCommand("cancel", "إلغاء الجلسة"),
-        BotCommand("boost", "🚀 تفعيل المعالجة المتوازية"),
-        BotCommand("unboost", "🔴 إيقاف المعالجة المتوازية")
+        BotCommand("end_session", "إنهاء الجلسة"), BotCommand("cancel", "إلغاء الجلسة")
     ]
     await bot.set_my_commands(public_commands)
     
@@ -168,11 +150,7 @@ async def post_init(app: Application) -> None:
         BotCommand("uploaddict", "📚 رفع قاموس المصطلحات"), BotCommand("downloaddict", "📥 تحميل القاموس"),
     ]
     super_admin_commands = admin_commands + [
-        BotCommand("addadmin", "👑 ترقية لمشرف"), BotCommand("removeadmin", "📉 إزالة مشرف"),
-        BotCommand("setlimit", "⚙️ تحديد الحد العام للمعالجة"),
-        BotCommand("setboostlimit", "🚀 تحديد سقف التعزيز"),
-        BotCommand("grantparallel", "✅ منح معالجة متوازية"),
-        BotCommand("revokeparallel", "📉 سحب معالجة متوازية")
+        BotCommand("addadmin", "👑 ترقية لمشرف"), BotCommand("removeadmin", "📉 إزالة مشرف")
     ]
     
     admins = await access_manager.get_admins()
@@ -206,8 +184,6 @@ def main() -> None:
     app.add_handler(CommandHandler("start_session", start_session_command))
     app.add_handler(CommandHandler("end_session", end_session_command))
     app.add_handler(CommandHandler("cancel", cancel_command))
-    app.add_handler(CommandHandler("boost", boost_command))
-    app.add_handler(CommandHandler("unboost", unboost_command))
     
     # Admin commands
     app.add_handler(CommandHandler("addkey", add_public_key_command))
@@ -226,10 +202,6 @@ def main() -> None:
     # Super admin commands
     app.add_handler(CommandHandler("addadmin", add_admin_command))
     app.add_handler(CommandHandler("removeadmin", remove_admin_command))
-    app.add_handler(CommandHandler("setlimit", set_limit_command))
-    app.add_handler(CommandHandler("setboostlimit", set_boost_limit_command))
-    app.add_handler(CommandHandler("grantparallel", grant_parallel_command))
-    app.add_handler(CommandHandler("revokeparallel", revoke_parallel_command))
     
     # Persistent keyboard buttons
     app.add_handler(MessageHandler(filters.Regex("⚙️ الإعدادات"), settings_command))
@@ -240,15 +212,6 @@ def main() -> None:
     # Callback query handlers (ordered by specificity)
     # Settings callbacks
     app.add_handler(CallbackQueryHandler(settings_callback, pattern="^(open_|set_|back_|toggle_|add_|del_)"))
-    
-    # Boost selection callback
-    app.add_handler(CallbackQueryHandler(handle_boost_callback, pattern="^boost_req_"))
-    
-    # Setlimit callback (super admin)
-    app.add_handler(CallbackQueryHandler(handle_setlimit_callback, pattern="^adm_act_setlimit_"))
-    
-    # Setboostlimit callback (super admin)
-    app.add_handler(CallbackQueryHandler(handle_setboostlimit_callback, pattern="^adm_act_setboost_"))
     
     # Interactive access management callbacks
     app.add_handler(CallbackQueryHandler(handle_access_callback, pattern="^adm_(sel|conf|nav)_access_"))
@@ -267,7 +230,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
 
-    logger.info("Starting Manga Translation Bot with Dynamic Concurrency Engine...")
+    logger.info("Starting Manga Translation Bot with Sequential Processing Engine...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":

@@ -28,6 +28,11 @@ class BatchManager:
         self._last_tracker_updates: Dict[int, float] = {}
         self._force_update_tracker: Set[int] = set()
         
+        # Local In-Memory Locks (Replaced ConcurrencyManager Locks)
+        self._tracker_locks: Dict[int, asyncio.Lock] = {}
+        self._chat_locks: Dict[int, asyncio.Lock] = {}
+        self._locks_creation_lock = asyncio.Lock()
+        
         self._lock = asyncio.Lock()
         self._received_counts_lock = asyncio.Lock()
 
@@ -200,6 +205,30 @@ class BatchManager:
         async with self._lock:
             self._cleanup_stale_sessions()
             return self._session_start_times.get(user_id)
+
+    # --- LOCAL LOCKS ENGINE ---
+
+    async def acquire_tracker_lock(self, user_id: int) -> None:
+        async with self._locks_creation_lock:
+            if user_id not in self._tracker_locks:
+                self._tracker_locks[user_id] = asyncio.Lock()
+        await self._tracker_locks[user_id].acquire()
+
+    async def release_tracker_lock(self, user_id: int) -> None:
+        lock = self._tracker_locks.get(user_id)
+        if lock and lock.locked():
+            lock.release()
+
+    async def acquire_chat_send_lock(self, chat_id: int) -> None:
+        async with self._locks_creation_lock:
+            if chat_id not in self._chat_locks:
+                self._chat_locks[chat_id] = asyncio.Lock()
+        await self._chat_locks[chat_id].acquire()
+
+    async def release_chat_send_lock(self, chat_id: int) -> None:
+        lock = self._chat_locks.get(chat_id)
+        if lock and lock.locked():
+            lock.release()
 
     # --- TRACKER DEBOUNCE ENGINE ---
 

@@ -9,7 +9,6 @@ from uuid import UUID
 
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.job_orchestration.contracts import PipelineProtocol, ErrorNotifierProtocol
-from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 from shared.logger import job_logger
 from systems.translation_pipeline.models.page_job import PageJob, JobState
 
@@ -23,16 +22,12 @@ class JobManager:
     def __init__(
         self, 
         queue_manager: AsyncSingleWorkerQueue, 
-        concurrency_manager: ConcurrencyManager, 
-        max_running_jobs: int = 1, 
         post_job_delay: int = 0
     ) -> None:
         self._queue = queue_manager
-        self._concurrency_manager = concurrency_manager
         self._registry: dict[UUID, PageJob] = {}
         self._lock = asyncio.Lock()
         self._worker_tasks: list[asyncio.Task] = []
-        self.max_running_jobs = max_running_jobs
         self.POST_JOB_DELAY_SECONDS = post_job_delay
 
         self._pipeline: Optional[PipelineProtocol] = None
@@ -65,24 +60,9 @@ class JobManager:
 
     async def start(self) -> None:
         if not self._worker_tasks:
-            for i in range(self.max_running_jobs):
-                task = asyncio.create_task(self._worker_loop(i + 1))
-                self._worker_tasks.append(task)
-
-    async def scale_workers(self, target_count: int) -> None:
-        async with self._lock:
-            current_count = len(self._worker_tasks)
-            if target_count > current_count:
-                for i in range(current_count, target_count):
-                    task = asyncio.create_task(self._worker_loop(i + 1))
-                    self._worker_tasks.append(task)
-                logger.info(f"Scaled UP workers: {current_count} -> {target_count}")
-            elif target_count < current_count:
-                tasks_to_cancel = self._worker_tasks[target_count:]
-                self._worker_tasks = self._worker_tasks[:target_count]
-                for task in tasks_to_cancel:
-                    task.cancel()
-                logger.info(f"Scaled DOWN workers: {current_count} -> {target_count}")
+            # Enforce a single sequential worker
+            task = asyncio.create_task(self._worker_loop(1))
+            self._worker_tasks.append(task)
 
     async def stop(self) -> None:
         for task in self._worker_tasks:
@@ -109,8 +89,6 @@ class JobManager:
                 job_completed_successfully = False
                 
                 try:
-                    await self._concurrency_manager.acquire_processing_slot(job.user_id)
-                    
                     await self._transition_state(job, JobState.PROCESSING)
                     job = await self._pipeline.process(job)
 
@@ -128,7 +106,6 @@ class JobManager:
                     job_completed_successfully = True
 
                 except asyncio.CancelledError:
-                    # الإلغاء الآمن (Re-enqueue on Cancel)
                     logger.warning(f"Worker {worker_id} cancelled during JobID={current_job_id}. Re-enqueuing...")
                     try:
                         async with self._lock:
@@ -138,11 +115,11 @@ class JobManager:
                         logger.info(f"JobID={current_job_id} re-enqueued successfully.")
                     except asyncio.QueueFull:
                         logger.error(f"Failed to re-enqueue JobID={current_job_id}: Queue is full! Job is lost.")
-                        job.state = JobState.FAILED  # وضع علامة فاشل ليتم حذفه في الـ finally
+                        job.state = JobState.FAILED
                     except Exception as e:
                         logger.error(f"Failed to re-enqueue JobID={current_job_id}: {e}. Job is lost.")
                         job.state = JobState.FAILED
-                    raise  # إعادة رمي الخطأ لإنهاء الـ Task نهائياً
+                    raise
 
                 except Exception as e:
                     job_logger.log_error(current_job_id, e)
@@ -154,12 +131,8 @@ class JobManager:
                             logger.error(f"Failed to send error notification: {notify_err}")
                 
                 finally:
-                    # يتم تنفيذ هذا الجزء سواء نجحت المهمة، فشلت، أو تم إلغاؤها (بعد إعادة وضعها في الطابور)
-                    await self._concurrency_manager.release_processing_slot(job.user_id)
-                    await self._queue.task_done()  # إخبار الطابور أننا انتهينا من هذه النسخة
+                    await self._queue.task_done()
                     
-                    # لا نحذف من السجل إلا إذا اكتملت أو فشلت definitively
-                    # إذا تم إلغاؤها وأعيد وضعها، لن تكون حالتها FINISHED أو FAILED، لذا تبقى في السجل
                     if job_completed_successfully or job.state == JobState.FAILED:
                         async with self._lock:
                             self._registry.pop(job.job_id, None)

@@ -12,7 +12,6 @@ from telegram.error import RetryAfter, BadRequest
 from systems.delivery.renderers.telegram import TelegramRenderer
 from systems.delivery.batch import BatchManager
 from systems.access_control.user_settings import UserSettingsManager
-from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.translation_pipeline.registry import PersonaRegistry
 from systems.translation_pipeline.models.page_job import PageJob
@@ -26,7 +25,6 @@ class GroupedSessionStrategy:
         bot: Bot,
         batch: BatchManager,
         settings: UserSettingsManager,
-        concurrency: ConcurrencyManager,
         personas: PersonaRegistry,
         queue: AsyncSingleWorkerQueue,
         renderer: TelegramRenderer
@@ -34,7 +32,6 @@ class GroupedSessionStrategy:
         self._bot = bot
         self._batch = batch
         self._settings = settings
-        self._concurrency = concurrency
         self._personas = personas
         self._queue = queue
         self._renderer = renderer
@@ -73,7 +70,7 @@ class GroupedSessionStrategy:
         if not await self._batch.can_update_tracker(job.user_id):
             return
             
-        await self._concurrency.acquire_tracker_lock(job.user_id)
+        await self._batch.acquire_tracker_lock(job.user_id)
         try:
             tracker_id = await self._batch.get_tracker(job.user_id)
             session_data = await self._batch.get_session_data(job.user_id)
@@ -162,7 +159,7 @@ class GroupedSessionStrategy:
                 except Exception as e:
                     logger.error(f"Failed to create new tracker: {e}")
         finally:
-            await self._concurrency.release_tracker_lock(job.user_id)
+            await self._batch.release_tracker_lock(job.user_id)
 
     async def compile_and_send(self, user_id: int, chat_id: int) -> None:
         session_data = await self._batch.get_session_data(user_id)
@@ -205,7 +202,7 @@ class GroupedSessionStrategy:
                             except Exception:
                                 pass
             else:
-                await self._concurrency.acquire_chat_send_lock(chat_id)
+                await self._batch.acquire_chat_send_lock(chat_id)
                 try:
                     if fmt in ["txt", "both"]:
                         file_io = await asyncio.to_thread(handler.generate_txt, session_data)
@@ -237,7 +234,7 @@ class GroupedSessionStrategy:
                                 document=InputFile(file_io, filename=f"{base_filename}.docx")
                             )
                 finally:
-                    await self._concurrency.release_chat_send_lock(chat_id)
+                    await self._batch.release_chat_send_lock(chat_id)
                     
             await self._bot.send_message(
                 chat_id=chat_id,

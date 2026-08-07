@@ -12,7 +12,6 @@ from telegram.error import RetryAfter, BadRequest
 from systems.delivery.renderers.telegram import TelegramRenderer
 from systems.delivery.batch import BatchManager
 from systems.access_control.user_settings import UserSettingsManager
-from systems.job_orchestration.concurrency.manager import ConcurrencyManager
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
 from systems.translation_pipeline.registry import PersonaRegistry
 from systems.translation_pipeline.models.page_job import PageJob
@@ -26,7 +25,6 @@ class IndividualSessionStrategy:
         bot: Bot,
         batch: BatchManager,
         settings: UserSettingsManager,
-        concurrency: ConcurrencyManager,
         personas: PersonaRegistry,
         queue: AsyncSingleWorkerQueue,
         renderer: TelegramRenderer
@@ -34,7 +32,6 @@ class IndividualSessionStrategy:
         self._bot = bot
         self._batch = batch
         self._settings = settings
-        self._concurrency = concurrency
         self._personas = personas
         self._queue = queue
         self._renderer = renderer
@@ -71,7 +68,7 @@ class IndividualSessionStrategy:
         if output_method in ["files_only", "messages_and_files"]:
             base_filename = job.file_name.split('.')[0] if job.file_name else f"image_{total_pages}"
             try:
-                await self._concurrency.acquire_chat_send_lock(job.chat_id)
+                await self._batch.acquire_chat_send_lock(job.chat_id)
                 if fmt in ["txt", "both"]:
                     file_io = await asyncio.to_thread(handler.generate_txt, [job.page_data])
                     try:
@@ -107,7 +104,7 @@ class IndividualSessionStrategy:
                             reply_to_message_id=job.photo_message_id
                         )
             finally:
-                await self._concurrency.release_chat_send_lock(job.chat_id)
+                await self._batch.release_chat_send_lock(job.chat_id)
                 
         return job
 
@@ -120,7 +117,7 @@ class IndividualSessionStrategy:
         if not await self._batch.can_update_tracker(job.user_id):
             return
             
-        await self._concurrency.acquire_tracker_lock(job.user_id)
+        await self._batch.acquire_tracker_lock(job.user_id)
         try:
             tracker_id = await self._batch.get_tracker(job.user_id)
             start_time = await self._batch.get_session_start_time(job.user_id)
@@ -179,7 +176,7 @@ class IndividualSessionStrategy:
                 except Exception as e:
                     logger.error(f"Failed to create new individual tracker: {e}")
         finally:
-            await self._concurrency.release_tracker_lock(job.user_id)
+            await self._batch.release_tracker_lock(job.user_id)
 
     async def compile_and_send(self, user_id: int, chat_id: int) -> None:
         tracker_id = await self._batch.get_tracker(user_id)
