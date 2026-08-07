@@ -50,26 +50,53 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
 async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     
     if not await container.batch.is_session_active(user_id):
         await update.message.reply_text("⚠️ *لا توجد جلسة نشطة حالياً\\.*\nاضغط *🟢 بدء الجلسة* أولاً قبل إرسال الصور\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
+    pending_files = await container.batch.get_pending_files(user_id)
+    if not pending_files:
+        await update.message.reply_text("⚠️ *الجلسة فارغة\\.*\nلم تقم بإرسال أي صور صالحة\\. أرسل صوراً أولاً ثم أنهِ الجلسة\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        return
+
+    # Delete intake tracker
+    tracker_id = await container.batch.get_tracker(user_id)
+    if tracker_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=tracker_id)
+        except Exception:
+            pass
+        await container.batch.set_tracker(user_id, None)
+
     session_mode = await container.batch.get_session_mode(user_id)
     
-    if session_mode == "individual":
-        await container.batch.clear_session(user_id)
-        await container.batch.set_finalizing(user_id, False)
-        await update.message.reply_text("🚪 *تم إنهاء الجلسة الفردية بنجاح\\.*\nتم إرسال جميع الملفات سابقاً\\. يمكنك بدء جلسة جديدة متى شئت\\.", parse_mode=ParseMode.MARKDOWN_V2)
-        return
-
-    session_data = await container.batch.get_session_data(user_id)
-    if not session_data:
-        await update.message.reply_text("⚠️ *الجلسة فارغة\\.*\nلم تقم بإرسال أي صور صالحة\\. أرسل صوراً أولاً ثم أنهِ الجلسة\\.", parse_mode=ParseMode.MARKDOWN_V2)
-        await container.batch.clear_session(user_id)
-        return
-
+    # Mark as finalizing and pending compile for both modes
     await container.batch.set_finalizing(user_id, True)
+    await container.batch.set_pending_compile(user_id)
+    
+    if session_mode == "individual":
+        text = (
+            "⏳ <b>جاري ترجمة الصور وإرسالها فردياً...</b>\n\n"
+            "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+            f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
+            "• تمت ترجمتها: <code>0</code>\n"
+            "• قيد المعالجة الآن: <code>0</code>\n"
+            "• في الطابور: <code>0</code>\n\n"
+            "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم إرسال كل الملفات.</i>"
+        )
+        try:
+            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+            await container.batch.set_tracker(user_id, msg.message_id)
+            await container.batch.force_update_tracker(user_id)
+        except Exception as e:
+            logger.error(f"Failed to create individual processing tracker: {e}")
+            
+        await container.delivery.flush_pending_to_queue(user_id, chat_id)
+        return
+
+    # Grouped mode
     context.user_data['awaiting_session_filename'] = True
     
     text = (
@@ -135,6 +162,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     
     context.user_data['awaiting_session_filename'] = False
     
@@ -145,21 +173,36 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
     await container.batch.set_custom_filename(user_id, clean_filename)
     
     try:
-        await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=update.message.message_id)
+        await context.bot.delete_message(chat_id=chat_id, message_id=update.message.message_id)
     except Exception:
         pass
     
-    queue_size = await container.queue.size()
-    
-    if queue_size > 0:
-        await container.batch.set_pending_compile(user_id)
-        msg_text = f"⏳ *تم تسجيل اسم الملف:* `{escaped_filename}`\nلا تزال لديك صور قيد المعالجة\\. سيقوم البوت بتجميع الملف وإرساله فور اكتمالها\\."
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=msg_text, parse_mode=ParseMode.MARKDOWN_V2)
-        return
+    prompt_msg_id = await container.batch.get_prompt_message_id(user_id)
+    if prompt_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prompt_msg_id)
+            await container.batch.set_prompt_message_id(user_id, None)
+        except Exception:
+            pass
 
-    msg_text = f"⏳ *جاري تجميع الترجمة بإسم:* `{escaped_filename}`\\.\\.\\."
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=msg_text, parse_mode=ParseMode.MARKDOWN_V2)
-        
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_DOCUMENT)
+    pending_files = await container.batch.get_pending_files(user_id)
+    text = (
+        "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
+        "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+        f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
+        "• تمت ترجمتها: <code>0</code>\n"
+        "• قيد المعالجة الآن: <code>0</code>\n"
+        "• في الطابور: <code>0</code>\n\n"
+        "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
+    )
     
-    await container.delivery.compile_session(user_id, update.effective_chat.id)
+    try:
+        msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        await container.batch.set_tracker(user_id, msg.message_id)
+        await container.batch.force_update_tracker(user_id)
+    except Exception as e:
+        logger.error(f"Failed to create grouped processing tracker: {e}")
+        
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    
+    await container.delivery.flush_pending_to_queue(user_id, chat_id)

@@ -43,7 +43,6 @@ class IndividualSessionStrategy:
             return job
 
         total_pages = await self._batch.add_page_data(job.user_id, job.page_data)
-        
         queue_size = await self._queue.size()
         total_received = await self._batch.get_received_count(job.user_id)
         processing_count = total_received - total_pages - queue_size
@@ -105,6 +104,12 @@ class IndividualSessionStrategy:
                         )
             finally:
                 await self._batch.release_chat_send_lock(job.chat_id)
+
+        # Phase 3: Final state detection
+        is_pending = await self._batch.is_pending_compile(job.user_id)
+        if is_pending and queue_size == 0 and processing_count == 0:
+            if await self._batch.try_acquire_compile_lock(job.user_id):
+                await self.compile_and_send(job.user_id, job.chat_id)
                 
         return job
 
@@ -128,9 +133,9 @@ class IndividualSessionStrategy:
             elapsed_time = f"{hours:02d}:{mins:02d}:{secs:02d}"
             
             text = (
-                f"✅ <b>تمت معالجة الصور بنجاح وتخزينها في الجلسة.</b>\n\n"
+                f"⏳ <b>جاري ترجمة الصور وإرسالها فردياً...</b>\n\n"
                 f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-                f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
+                f"• إجمالي الصور: <code>{total_received}</code>\n"
                 f"• تمت ترجمتها: <code>{total_pages}</code>\n"
                 f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
                 f"• في الطابور: <code>{queue_size}</code>\n"
@@ -179,16 +184,18 @@ class IndividualSessionStrategy:
             await self._batch.release_tracker_lock(job.user_id)
 
     async def compile_and_send(self, user_id: int, chat_id: int) -> None:
+        # Phase 3: Delete tracker and send final completion message
         tracker_id = await self._batch.get_tracker(user_id)
         if tracker_id:
             try:
                 await self._bot.delete_message(chat_id=chat_id, message_id=tracker_id)
             except Exception:
                 pass
+            await self._batch.set_tracker(user_id, None)
                 
         await self._bot.send_message(
             chat_id=chat_id,
-            text="✅ *اكتملت الجلسة بنجاح\\!*\nتم إرسال جميع ملفات الترجمة الفردية\\. يمكنك بدء جلسة جديدة متى شئت\\.",
+            text="✅ *اكتملت الجلسة الفردية بنجاح\\!*\nتم إرسال جميع ملفات الترجمة الفردية\\. يمكنك بدء جلسة جديدة متى شئت\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         await self._batch.clear_session(user_id)

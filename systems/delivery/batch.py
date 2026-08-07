@@ -24,6 +24,9 @@ class BatchManager:
         self._received_counts: Dict[int, int] = {}
         self._session_start_times: Dict[int, float] = {}
         
+        # Phase 1: Intake & Caching Engine
+        self._pending_file_ids: Dict[int, List[Tuple[str, str, int]]] = {}
+        
         # Race & Flood Control Isolation
         self._last_tracker_updates: Dict[int, float] = {}
         self._force_update_tracker: Set[int] = set()
@@ -56,6 +59,7 @@ class BatchManager:
             self._last_tracker_updates.pop(user_id, None)
             self._force_update_tracker.discard(user_id)
             self._finalizing_users.discard(user_id)
+            self._pending_file_ids.pop(user_id, None)
 
     async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
         async with self._lock:
@@ -70,6 +74,7 @@ class BatchManager:
                 self._received_counts[user_id] = 0
                 self._session_start_times[user_id] = time.time()
                 self._last_tracker_updates[user_id] = 0.0
+                self._pending_file_ids[user_id] = []
             self._finalizing_users.discard(user_id)
 
     async def get_session_persona(self, user_id: int) -> Optional[str]:
@@ -117,6 +122,9 @@ class BatchManager:
             self._last_tracker_updates.pop(user_id, None)
             self._force_update_tracker.discard(user_id)
             self._finalizing_users.discard(user_id)
+            self._pending_compiles.discard(user_id)
+            self._pending_file_ids.pop(user_id, None)
+            self._received_counts.pop(user_id, None)
 
     async def set_pending_compile(self, user_id: int) -> None:
         async with self._lock:
@@ -254,3 +262,22 @@ class BatchManager:
                 
             self._last_tracker_updates[user_id] = time.time()
             return True
+
+    # --- PHASE 1: INTAKE & CACHING ENGINE ---
+
+    async def add_pending_file(self, user_id: int, file_id: str, file_name: str, photo_message_id: int) -> int:
+        async with self._lock:
+            self._cleanup_stale_sessions()
+            if user_id not in self._pending_file_ids:
+                self._pending_file_ids[user_id] = []
+            self._pending_file_ids[user_id].append((file_id, file_name, photo_message_id))
+            return len(self._pending_file_ids[user_id])
+
+    async def get_pending_files(self, user_id: int) -> List[Tuple[str, str, int]]:
+        async with self._lock:
+            self._cleanup_stale_sessions()
+            return list(self._pending_file_ids.get(user_id, []))
+
+    async def clear_pending_files(self, user_id: int) -> None:
+        async with self._lock:
+            self._pending_file_ids[user_id] = []

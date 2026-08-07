@@ -116,7 +116,8 @@ async def post_init(app: Application) -> None:
         individual_strategy=individual_strategy,
         image_optimizer=optimize_image,
         queue_manager=queue_manager,
-        glossary_manager=glossary_manager
+        glossary_manager=glossary_manager,
+        job_manager=job_manager
     )
     
     job_manager.attach(

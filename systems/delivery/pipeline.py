@@ -19,6 +19,7 @@ from systems.delivery.senders.strategies.grouped_session import GroupedSessionSt
 from systems.delivery.senders.strategies.individual_session import IndividualSessionStrategy
 from systems.delivery.utils import safe_edit_or_send
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
+from systems.job_orchestration.worker import JobManager
 from systems.job_orchestration.contracts import PipelineProtocol
 from systems.translation_pipeline.models.page_job import PageJob, MessagePayload
 from systems.glossary.manager import GlossaryManager
@@ -41,7 +42,8 @@ class DeliveryPipeline:
         individual_strategy: IndividualSessionStrategy,
         image_optimizer: Callable[[bytes], bytes],
         queue_manager: AsyncSingleWorkerQueue,
-        glossary_manager: GlossaryManager
+        glossary_manager: GlossaryManager,
+        job_manager: JobManager
     ) -> None:
         self._bot = bot
         self._ai = ai_provider
@@ -54,6 +56,7 @@ class DeliveryPipeline:
         self._image_optimizer = image_optimizer
         self._queue = queue_manager
         self._glossary = glossary_manager
+        self._jobs = job_manager
         self._env_settings = Settings()
 
     async def process(self, job: PageJob) -> PageJob:
@@ -148,3 +151,25 @@ class DeliveryPipeline:
             await self._individual_strategy.compile_and_send(user_id, chat_id)
         else:
             await self._grouped_strategy.compile_and_send(user_id, chat_id)
+
+    async def flush_pending_to_queue(self, user_id: int, chat_id: int) -> None:
+        """Phase 2: Flushes cached pending files into the JobManager queue."""
+        pending_files = await self._batch.get_pending_files(user_id)
+        if not pending_files:
+            logger.warning(f"Flush called for UserID={user_id} but no pending files found.")
+            return
+            
+        await self._batch.clear_pending_files(user_id)
+        
+        for file_id, file_name, photo_msg_id in pending_files:
+            job = PageJob(
+                user_id=user_id, 
+                chat_id=chat_id, 
+                image_file_id=file_id, 
+                file_name=file_name,
+                photo_message_id=photo_msg_id
+            )
+            await self._jobs.submit_job(job)
+            await self._batch.increment_received_count(user_id)
+            
+        logger.info(f"UserID={user_id} | Flushed {len(pending_files)} pending files to queue.")

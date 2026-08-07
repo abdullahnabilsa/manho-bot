@@ -96,15 +96,15 @@ class GroupedSessionStrategy:
             if is_pending:
                 if queue_size > 0 or processing_count > 0:
                     text = (
-                        f"⏳ <b>معالجة الصور المتبقية للجلسة...</b>\n\n"
+                        f"⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
                         f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-                        f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
+                        f"• إجمالي الصور: <code>{total_received}</code>\n"
                         f"• تمت ترجمتها: <code>{total_pages}</code>\n"
                         f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
                         f"• في الطابور: <code>{queue_size}</code>\n"
                         f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
                         f"{files_block}\n\n"
-                        f"<i>تم استلام اسم الملف. جاري معالجة الباقي تلقائياً، يرجى الانتظار...</i>"
+                        f"<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
                     )
                 else:
                     text = "📦 <b>اكتملت معالجة جميع الصور!</b>\nجاري تجميع الملفات النهائية وإرسالها..."
@@ -246,6 +246,14 @@ class GroupedSessionStrategy:
             if prompt_msg_id:
                 try:
                     await self._bot.delete_message(chat_id=chat_id, message_id=prompt_msg_id)
+                except Exception:
+                    pass
+
+            # Phase 3: Cleanup Tracker to keep chat clean
+            tracker_id = await self._batch.get_tracker(user_id)
+            if tracker_id:
+                try:
+                    await self._bot.delete_message(chat_id=chat_id, message_id=tracker_id)
                 except Exception:
                     pass
                 
