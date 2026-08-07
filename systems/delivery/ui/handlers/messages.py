@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as _time
+from datetime import datetime, timezone
 from typing import Optional
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -76,16 +77,22 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
     
     # Phase 1: Intake & Caching Engine (Zero Network Usage for AI)
-    pending_count = await batch_manager.add_pending_file(user.id, image_file_id, file_name, update.message.message_id)
+    await batch_manager.add_pending_file(user.id, image_file_id, file_name, update.message.message_id)
     
-    # Lightweight Intake Tracker Update
-    if not await batch_manager.can_update_tracker(user.id, 0.8):
-        return
-        
+    # Floating Flood-Proof Tracker Strategy
     await batch_manager.acquire_tracker_lock(user.id)
     try:
-        tracker_id = await batch_manager.get_tracker(user.id)
+        current_time = _time.time()
+        last_update_time = context.user_data.get('last_intake_update', 0.0)
+        
+        # Flood Shield: If we updated less than 0.5s ago, skip API call to avoid 429
+        if current_time - last_update_time < 0.5:
+            return
+            
+        context.user_data['last_intake_update'] = current_time
+        
         pending_files = await batch_manager.get_pending_files(user.id)
+        pending_count = len(pending_files)
         
         file_names_html = [escape_html(f[1]) for f in pending_files if f[1]]
         if len(file_names_html) > 25:
@@ -111,6 +118,23 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"<i>عند الانتهاء من إرسال كل الصور، اضغط زر 🔴 إنهاء الجلسة لبدء الترجمة.</i>"
         )
         
+        # The 3-Second Floating Rule
+        current_msg_time = update.message.date if update.message.date else datetime.now(timezone.utc)
+        last_msg_time = context.user_data.get('last_image_time')
+        
+        is_new_batch = not last_msg_time or (current_msg_time - last_msg_time).total_seconds() > 3.0
+        context.user_data['last_image_time'] = current_msg_time
+        
+        tracker_id = await batch_manager.get_tracker(user.id)
+        
+        # If > 3 seconds, delete old tracker to send a new one at the bottom of the chat
+        if is_new_batch and tracker_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=tracker_id)
+            except Exception:
+                pass
+            tracker_id = None
+            
         if tracker_id:
             try:
                 await context.bot.edit_message_text(
