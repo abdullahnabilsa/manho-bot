@@ -27,6 +27,10 @@ class BatchManager:
         # Intake & Caching Engine
         self._pending_file_ids: Dict[int, List[Tuple[str, str, int]]] = {}
         
+        # UX Enhancements: Notes & Photo IDs
+        self._session_notes: Dict[int, str] = {}
+        self._session_photo_ids: Dict[int, List[int]] = {}
+        
         # Decoupled Compile Lock
         self._compile_locks: Set[int] = set()
         
@@ -64,6 +68,8 @@ class BatchManager:
             self._finalizing_users.discard(user_id)
             self._pending_file_ids.pop(user_id, None)
             self._compile_locks.discard(user_id)
+            self._session_notes.pop(user_id, None)
+            self._session_photo_ids.pop(user_id, None)
 
     async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
         async with self._lock:
@@ -79,6 +85,8 @@ class BatchManager:
                 self._session_start_times[user_id] = time.time()
                 self._last_tracker_updates[user_id] = 0.0
                 self._pending_file_ids[user_id] = []
+                self._session_notes[user_id] = ""
+                self._session_photo_ids[user_id] = []
             self._finalizing_users.discard(user_id)
             self._compile_locks.discard(user_id)
 
@@ -130,6 +138,8 @@ class BatchManager:
             self._pending_compiles.discard(user_id)
             self._pending_file_ids.pop(user_id, None)
             self._compile_locks.discard(user_id)
+            self._session_notes.pop(user_id, None)
+            self._session_photo_ids.pop(user_id, None)
             self._received_counts.pop(user_id, None)
 
     async def set_pending_compile(self, user_id: int) -> None:
@@ -287,3 +297,23 @@ class BatchManager:
     async def clear_pending_files(self, user_id: int) -> None:
         async with self._lock:
             self._pending_file_ids[user_id] = []
+
+    # --- UX ENHANCEMENTS: NOTES & PHOTO IDS ---
+
+    async def set_session_note(self, user_id: int, note: str) -> None:
+        async with self._lock:
+            self._session_notes[user_id] = note
+
+    async def get_session_note(self, user_id: int) -> str:
+        async with self._lock:
+            return self._session_notes.get(user_id, "")
+
+    async def add_session_photo_id(self, user_id: int, message_id: int) -> None:
+        async with self._lock:
+            if user_id not in self._session_photo_ids:
+                self._session_photo_ids[user_id] = []
+            self._session_photo_ids[user_id].append(message_id)
+
+    async def get_session_photo_ids(self, user_id: int) -> List[int]:
+        async with self._lock:
+            return list(self._session_photo_ids.get(user_id, []))

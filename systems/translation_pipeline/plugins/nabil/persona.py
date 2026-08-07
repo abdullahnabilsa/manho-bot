@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from docx import Document
 from docx.shared import Pt, RGBColor
@@ -86,9 +86,14 @@ class NabilPersona(BasePersona):
         total_msgs = str(len(messages))
         return [msg.replace("[[TOTAL_MSGS]]", total_msgs) for msg in messages]
 
-    def generate_txt(self, pages: List[PageData]) -> io.BytesIO:
+    def generate_txt(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO:
         buffer = io.StringIO()
         
+        if session_note:
+            buffer.write("═" * 60 + "\n")
+            buffer.write(f"  📝 ملاحظات الجلسة:\n  {session_note}\n")
+            buffer.write("═" * 60 + "\n\n")
+            
         buffer.write("═" * 60 + "\n")
         buffer.write("  💡 ملاحظة الرموز:\n")
         buffer.write("  # = فقاعة عادية\n")
@@ -114,12 +119,20 @@ class NabilPersona(BasePersona):
         buffer.close()
         return io.BytesIO(val.encode('utf-8'))
 
-    def generate_docx(self, pages: List[PageData]) -> io.BytesIO:
+    def generate_docx(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO:
         doc = Document()
         style = doc.styles['Normal']
         font = style.font
         font.name = 'Calibri'
         font.size = Pt(12)
+
+        if session_note:
+            p_note = doc.add_paragraph()
+            run_note = p_note.add_run(f"📝 ملاحظات الجلسة:\n{session_note}")
+            run_note.italic = True
+            run_note.font.size = Pt(10)
+            run_note.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+            doc.add_paragraph()
 
         p_legend = doc.add_paragraph()
         run_legend = p_legend.add_run("💡 ملاحظة الرموز:\n# = فقاعة عادية | $ = كلام بالخلفية | & = مؤثرات | * = كلام ب طرف الفقاعة")

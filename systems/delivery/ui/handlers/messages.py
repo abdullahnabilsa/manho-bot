@@ -77,11 +77,16 @@ async def _render_intake_tracker(update: Update, context: ContextTypes.DEFAULT_T
         mins, secs = divmod(rem, 60)
         elapsed_time = f"{hours:02d}:{mins:02d}:{secs:02d}"
         
+        note = await batch_manager.get_session_note(user_id)
+        note_block = f"📝 <b>الملاحظة:</b>\n<i>{escape_html(note)}</i>\n\n" if note else ""
+        
         text = (
             f"📥 <b>جاري استلام الصور وتجهيزها للجلسة...</b>\n\n"
             f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
+            f"{note_block}"
             f"{files_block}\n\n"
-            f"<i>عند الانتهاء من إرسال كل الصور، اضغط زر 🔴 إنهاء الجلسة لبدء الترجمة.</i>"
+            f"<i>عند الانتهاء من إرسال كل الصور، اضغط زر 🔴 إنهاء الجلسة لبدء الترجمة.</i>\n"
+            f"<i>لإضافة ملاحظة للملف، أرسل: /note ملاحظتك هنا</i>"
         )
         
         if tracker_id:
@@ -187,6 +192,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     # Phase 1: Intake & Caching Engine (Zero Network Usage for AI)
     await batch_manager.add_pending_file(user.id, image_file_id, file_name, update.message.message_id)
+    await batch_manager.add_session_photo_id(user.id, update.message.message_id)
     
     # 3-Second Floating Rule Evaluation
     current_msg_time = update.message.date if update.message.date else datetime.now(timezone.utc)

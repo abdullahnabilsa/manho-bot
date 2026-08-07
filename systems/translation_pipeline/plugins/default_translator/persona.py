@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import io
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from systems.translation_pipeline.base_persona import BasePersona
 from systems.translation_pipeline.models.page_job import PageJob
@@ -27,8 +27,8 @@ class DefaultPersona(BasePersona):
     async def paginate(self, job: PageJob, mode: str = "scene_split") -> List[str]:
         return await self._paginator.paginate(job, page_num=1, mode=mode)
 
-    def generate_txt(self, pages: List[PageData]) -> io.BytesIO:
-        return FileGenerator.generate_txt(pages)
+    def generate_txt(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO:
+        return FileGenerator.generate_txt(pages, session_note)
 
-    def generate_docx(self, pages: List[PageData]) -> io.BytesIO:
-        return FileGenerator.generate_docx(pages)
+    def generate_docx(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO:
+        return FileGenerator.generate_docx(pages, session_note)

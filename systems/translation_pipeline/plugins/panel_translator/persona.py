@@ -240,8 +240,13 @@ class PanelPersona(BasePersona):
         total_msgs = str(len(messages))
         return [msg.replace("[[TOTAL_MSGS]]", total_msgs) for msg in messages]
 
-    def generate_txt(self, pages: List[PageData]) -> io.BytesIO:
+    def generate_txt(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO:
         buffer = io.StringIO()
+        
+        if session_note:
+            buffer.write("═" * 60 + "\n")
+            buffer.write(f"  📝 ملاحظات الجلسة:\n  {session_note}\n")
+            buffer.write("═" * 60 + "\n\n")
         
         for page_idx, page_data in enumerate(pages, 1):
             file_name = page_data.file_name or "Unknown"
@@ -278,12 +283,20 @@ class PanelPersona(BasePersona):
         buffer.close()
         return io.BytesIO(val.encode('utf-8'))
 
-    def generate_docx(self, pages: List[PageData]) -> io.BytesIO:
+    def generate_docx(self, pages: List[PageData], session_note: Optional[str] = None) -> io.BytesIO:
         doc = Document()
         style = doc.styles['Normal']
         font = style.font
         font.name = 'Calibri'
         font.size = Pt(11)
+
+        if session_note:
+            p_note = doc.add_paragraph()
+            run_note = p_note.add_run(f"📝 ملاحظات الجلسة:\n{session_note}")
+            run_note.italic = True
+            run_note.font.size = Pt(10)
+            run_note.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+            doc.add_paragraph()
 
         for page_idx, page_data in enumerate(pages, 1):
             file_name = page_data.file_name or "Unknown"
