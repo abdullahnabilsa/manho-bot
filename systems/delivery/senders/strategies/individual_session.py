@@ -105,7 +105,7 @@ class IndividualSessionStrategy:
             finally:
                 await self._batch.release_chat_send_lock(job.chat_id)
 
-        # Phase 3: Final state detection
+        # Final state detection
         is_pending = await self._batch.is_pending_compile(job.user_id)
         if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
@@ -184,7 +184,7 @@ class IndividualSessionStrategy:
             await self._batch.release_tracker_lock(job.user_id)
 
     async def compile_and_send(self, user_id: int, chat_id: int) -> None:
-        # Phase 3: Delete tracker and send final completion message
+        # Delete tracker and send final completion message
         tracker_id = await self._batch.get_tracker(user_id)
         if tracker_id:
             try:

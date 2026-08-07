@@ -55,6 +55,14 @@ class GroupedSessionStrategy:
         
         if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
+                try:
+                    await self._bot.send_message(
+                        chat_id=job.chat_id,
+                        text="📦 <b>اكتملت معالجة جميع الصور!</b>\nجاري تجميع الملفات النهائية وإرسالها...",
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception:
+                    pass
                 await self.compile_and_send(job.user_id, job.chat_id)
             
         return job
@@ -94,20 +102,18 @@ class GroupedSessionStrategy:
             files_block = f"<blockquote expandable>📄 <b>الصور المجهزة:</b>\n{files_text}</blockquote>"
             
             if is_pending:
-                if queue_size > 0 or processing_count > 0:
-                    text = (
-                        f"⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
-                        f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-                        f"• إجمالي الصور: <code>{total_received}</code>\n"
-                        f"• تمت ترجمتها: <code>{total_pages}</code>\n"
-                        f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
-                        f"• في الطابور: <code>{queue_size}</code>\n"
-                        f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
-                        f"{files_block}\n\n"
-                        f"<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
-                    )
-                else:
-                    text = "📦 <b>اكتملت معالجة جميع الصور!</b>\nجاري تجميع الملفات النهائية وإرسالها..."
+                # Preserve the 100% stats, do not overwrite with "compiling" text
+                text = (
+                    f"⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
+                    f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                    f"• إجمالي الصور: <code>{total_received}</code>\n"
+                    f"• تمت ترجمتها: <code>{total_pages}</code>\n"
+                    f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                    f"• في الطابور: <code>{queue_size}</code>\n"
+                    f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
+                    f"{files_block}\n\n"
+                    f"<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
+                )
             else:
                 text = (
                     f"✅ <b>تمت معالجة الصور بنجاح وتخزينها في الجلسة.</b>\n\n"
@@ -249,7 +255,7 @@ class GroupedSessionStrategy:
                 except Exception:
                     pass
 
-            # Phase 3: Cleanup Tracker to keep chat clean
+            # Cleanup Stats Tracker to keep chat clean
             tracker_id = await self._batch.get_tracker(user_id)
             if tracker_id:
                 try:

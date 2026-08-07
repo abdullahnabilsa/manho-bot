@@ -24,8 +24,11 @@ class BatchManager:
         self._received_counts: Dict[int, int] = {}
         self._session_start_times: Dict[int, float] = {}
         
-        # Phase 1: Intake & Caching Engine
+        # Intake & Caching Engine
         self._pending_file_ids: Dict[int, List[Tuple[str, str, int]]] = {}
+        
+        # Decoupled Compile Lock
+        self._compile_locks: Set[int] = set()
         
         # Race & Flood Control Isolation
         self._last_tracker_updates: Dict[int, float] = {}
@@ -60,6 +63,7 @@ class BatchManager:
             self._force_update_tracker.discard(user_id)
             self._finalizing_users.discard(user_id)
             self._pending_file_ids.pop(user_id, None)
+            self._compile_locks.discard(user_id)
 
     async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
         async with self._lock:
@@ -76,6 +80,7 @@ class BatchManager:
                 self._last_tracker_updates[user_id] = 0.0
                 self._pending_file_ids[user_id] = []
             self._finalizing_users.discard(user_id)
+            self._compile_locks.discard(user_id)
 
     async def get_session_persona(self, user_id: int) -> Optional[str]:
         async with self._lock:
@@ -124,6 +129,7 @@ class BatchManager:
             self._finalizing_users.discard(user_id)
             self._pending_compiles.discard(user_id)
             self._pending_file_ids.pop(user_id, None)
+            self._compile_locks.discard(user_id)
             self._received_counts.pop(user_id, None)
 
     async def set_pending_compile(self, user_id: int) -> None:
@@ -140,9 +146,9 @@ class BatchManager:
 
     async def try_acquire_compile_lock(self, user_id: int) -> bool:
         async with self._lock:
-            if user_id in self._finalizing_users:
+            if user_id in self._compile_locks:
                 return False
-            self._finalizing_users.add(user_id)
+            self._compile_locks.add(user_id)
             return True
 
     async def set_tracker(self, user_id: int, message_id: Optional[int]) -> None:
@@ -263,7 +269,7 @@ class BatchManager:
             self._last_tracker_updates[user_id] = time.time()
             return True
 
-    # --- PHASE 1: INTAKE & CACHING ENGINE ---
+    # --- INTAKE & CACHING ENGINE ---
 
     async def add_pending_file(self, user_id: int, file_id: str, file_name: str, photo_message_id: int) -> int:
         async with self._lock:
