@@ -335,14 +335,15 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
     await container.delivery.flush_pending_to_queue(user_id, chat_id)
 
 async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Phase 3: Cleanup Engine - Deletes original photos in bulk."""
+    """Phase 3: Cleanup Engine - Deletes original photos in bulk (3-Tier Safe Cleanup)."""
     query = update.callback_query
     await query.answer("جاري تنظيف الشات...", show_alert=False)
     container = context.bot_data["container"]
     user_id = query.from_user.id
     chat_id = query.message.chat_id
     
-    photo_ids = await container.batch.get_session_photo_ids(user_id)
+    # Read from the isolated cleanup cache
+    photo_ids = await container.batch.get_cleanup_photo_ids(user_id)
     if not photo_ids:
         try:
             await query.edit_message_reply_markup(reply_markup=None)
@@ -357,6 +358,9 @@ async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.D
             await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
         except Exception as e:
             logger.warning(f"Failed to delete some messages: {e}")
+            
+    # Tier 1: Immediate memory cleanup after usage
+    await container.batch.clear_cleanup_photo_ids(user_id)
             
     try:
         await query.edit_message_reply_markup(reply_markup=None)

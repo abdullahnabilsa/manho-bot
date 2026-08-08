@@ -309,6 +309,9 @@ class GroupedSessionStrategy:
                 parse_mode=ParseMode.MARKDOWN_V2
             )
             
+        # 3-Tier Safe Cleanup: Transfer ownership before clearing session
+        await self._batch.transfer_session_to_cleanup(user_id)
+            
         await self._batch.clear_session(user_id)
         await self._batch.clear_pending_compile(user_id)
         await self._batch.set_finalizing(user_id, False)
