@@ -266,11 +266,22 @@ class GroupedSessionStrategy:
                 except Exception:
                     pass
 
-            # Phase 3: Persistent Log & Cleanup Engine
+            # Phase 3: Persistent Log & Cleanup Engine (Enriched)
             tracker_id = await self._batch.get_tracker(user_id)
             if tracker_id:
                 try:
                     note_html = escape_html(session_note) if session_note else "لا يوجد"
+                    
+                    file_names = [escape_html(pd.file_name) for pd in session_data if pd and pd.file_name]
+                    if len(file_names) > 25:
+                        start_index = len(file_names) - 10
+                        files_text = "… عرض آخر 10 صور\n" + "\n".join(
+                            [f"{i}. {name}" for i, name in enumerate(file_names[-10:], start=start_index + 1)]
+                        )
+                    else:
+                        files_text = "\n".join([f"{i}. {name}" for i, name in enumerate(file_names, start=1)])
+                    files_block = f"<blockquote expandable>📄 <b>الصور المترجمة:</b>\n{files_text}</blockquote>"
+                    
                     keyboard = InlineKeyboardMarkup([
                         [InlineKeyboardButton("🗑️ حذف الصور الأصلية", callback_data="cleanup_photos")]
                     ])
@@ -281,7 +292,8 @@ class GroupedSessionStrategy:
                             f"✅ <b>اكتملت الجلسة بنجاح!</b>\n\n"
                             f"📄 <b>اسم الملف:</b> <code>{escape_html(base_filename)}</code>\n"
                             f"🖼️ <b>عدد الصور:</b> <code>{len(session_data)}</code>\n"
-                            f"📝 <b>الملاحظة:</b>\n{note_html}\n"
+                            f"📝 <b>الملاحظة:</b>\n{note_html}\n\n"
+                            f"{files_block}"
                         ),
                         parse_mode=ParseMode.HTML,
                         reply_markup=keyboard

@@ -7,9 +7,14 @@ from telegram.ext import ContextTypes, ApplicationHandlerStop
 from shared.container import ServiceContainer
 from systems.delivery.ui.handlers.session import receive_session_filename
 
+# Callbacks that bypass middleware blocks
+ALLOWED_SESSION_CALLBACKS = {"skip_filename", "cancel_session", "cleanup_photos"}
+
 async def state_purge_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_session_filename'):
         if update.callback_query:
+            if update.callback_query.data in ALLOWED_SESSION_CALLBACKS:
+                return
             await update.callback_query.answer("📝 يرجى إرسال اسم الملف فقط كنص أو /cancel للإلغاء.", show_alert=True)
             raise ApplicationHandlerStop
             
@@ -60,10 +65,12 @@ async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT
 
     if context.user_data.get('awaiting_session_filename'):
         return
-    if update.callback_query and update.callback_query.data.startswith(("accept_req", "reject_req")):
-        return
-
+        
     if update.callback_query:
+        if update.callback_query.data in ALLOWED_SESSION_CALLBACKS:
+            return
+        if update.callback_query.data.startswith(("accept_req", "reject_req")):
+            return
         await update.callback_query.answer("🚫 معطل أثناء الجلسة. اضغط 🔴 إنهاء الجلسة للخروج.", show_alert=True)
         raise ApplicationHandlerStop
 
