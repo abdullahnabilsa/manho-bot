@@ -25,29 +25,20 @@ class BatchManager:
         self._received_counts: Dict[int, int] = {}
         self._session_start_times: Dict[int, float] = {}
         
-        # Intake & Caching Engine
         self._pending_file_ids: Dict[int, List[Tuple[str, str, int]]] = {}
-        
-        # Smart Intake Data
         self._session_notes: Dict[int, str] = {}
         self._session_photo_ids: Dict[int, List[int]] = {}
         
-        # 3-Tier Safe Cleanup Engine
         self._cleanup_photo_ids: Dict[int, Tuple[List[int], float]] = {}
-        
-        # Decoupled Compile Lock
         self._compile_locks: Set[int] = set()
         
-        # Race & Flood Control Isolation
         self._last_tracker_updates: Dict[int, float] = {}
         self._force_update_tracker: Set[int] = set()
         
-        # Local In-Memory Locks
         self._tracker_locks: Dict[int, asyncio.Lock] = {}
         self._chat_locks: Dict[int, asyncio.Lock] = {}
         self._locks_creation_lock = asyncio.Lock()
         
-        # Waiting Room Engine Data
         self._waiting_message_ids: Dict[int, int] = {}
 
     def _cleanup_stale_sessions(self) -> None:
@@ -85,7 +76,7 @@ class BatchManager:
             self._cleanup_photo_ids.pop(user_id, None)
 
     async def start_session(self, user_id: int, persona_name: str, session_mode: str) -> None:
-        self._cleanup_stale_sessions()
+        self._cleanup_stale_sessions()  # Only cleanup on new session start
         if user_id not in self._sessions:
             self._sessions[user_id] = ([], time.time())
             self._session_personas[user_id] = persona_name
@@ -106,19 +97,15 @@ class BatchManager:
         self._waiting_message_ids.pop(user_id, None)
 
     async def get_session_persona(self, user_id: int) -> Optional[str]:
-        self._cleanup_stale_sessions()
         return self._session_personas.get(user_id)
 
     async def get_session_mode(self, user_id: int) -> Optional[str]:
-        self._cleanup_stale_sessions()
         return self._session_modes.get(user_id)
 
     async def is_session_active(self, user_id: int) -> bool:
-        self._cleanup_stale_sessions()
         return user_id in self._sessions
 
     async def add_page_data(self, user_id: int, page_data: PageData) -> int:
-        self._cleanup_stale_sessions()
         if user_id not in self._sessions:
             self._sessions[user_id] = ([], time.time())
         data_list, _ = self._sessions[user_id]
@@ -127,11 +114,11 @@ class BatchManager:
         return len(data_list)
 
     async def get_session_data(self, user_id: int) -> List[PageData]:
-        self._cleanup_stale_sessions()
         data, _ = self._sessions.get(user_id, ([], time.time()))
         return data
 
     async def clear_session(self, user_id: int) -> None:
+        self._cleanup_stale_sessions()  # Cleanup on clear
         if user_id in self._sessions:
             del self._sessions[user_id]
         self._session_personas.pop(user_id, None)
@@ -199,7 +186,6 @@ class BatchManager:
         self._custom_filenames[user_id] = filename
 
     async def get_custom_filename(self, user_id: int) -> Optional[str]:
-        self._cleanup_stale_sessions()
         return self._custom_filenames.get(user_id)
 
     async def set_prompt_message_id(self, user_id: int, message_id: int) -> None:
@@ -218,7 +204,6 @@ class BatchManager:
         return user_id in self._finalizing_users
 
     async def get_session_start_time(self, user_id: int) -> Optional[float]:
-        self._cleanup_stale_sessions()
         return self._session_start_times.get(user_id)
 
     # --- WAITING ROOM ENGINE ---
@@ -277,14 +262,12 @@ class BatchManager:
     # --- INTAKE & CACHING ENGINE ---
 
     async def add_pending_file(self, user_id: int, file_id: str, file_name: str, photo_message_id: int) -> int:
-        self._cleanup_stale_sessions()
         if user_id not in self._pending_file_ids:
             self._pending_file_ids[user_id] = []
         self._pending_file_ids[user_id].append((file_id, file_name, photo_message_id))
         return len(self._pending_file_ids[user_id])
 
     async def get_pending_files(self, user_id: int) -> List[Tuple[str, str, int]]:
-        self._cleanup_stale_sessions()
         return list(self._pending_file_ids.get(user_id, []))
 
     async def clear_pending_files(self, user_id: int) -> None:

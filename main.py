@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from telegram import Update, BotCommand, BotCommandScopeChat
 from telegram.ext import (
     Application, ApplicationBuilder, ContextTypes, MessageHandler, 
@@ -68,6 +69,10 @@ logger = logging.getLogger("manga_bot.main")
 
 async def post_init(app: Application) -> None:
     bot = app.bot
+    
+    # Limit ThreadPoolExecutor to prevent CPU thrashing on heavy DOCX generation
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=4))
     
     db = Database(db_path="manga_bot.db")
     await db.connect()
@@ -230,7 +235,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
 
-    logger.info("Starting Manga Translation Bot with 4+1 Decoupled Pipeline Engine...")
+    logger.info("Starting Manga Translation Bot with Enterprise-Grade Optimizations...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":

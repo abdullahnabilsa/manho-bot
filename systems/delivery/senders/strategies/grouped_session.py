@@ -67,10 +67,8 @@ class GroupedSessionStrategy:
         if processing_count < 0:
             processing_count = 0
         
-        # Decoupled UI Update: Do not block compilation if Telegram is slow
         asyncio.create_task(self._update_session_tracker(job, total_pages, queue_size, processing_count, total_received, is_pending))
         
-        # Instant Completion Check
         if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
                 try:
@@ -234,22 +232,8 @@ class GroupedSessionStrategy:
                 for pd in session_data:
                     temp_job = PageJob(user_id=user_id, chat_id=chat_id, page_data=pd, file_name=pd.file_name)
                     msgs = await handler.paginate(temp_job, mode=mode)
-                    for msg_text in msgs:
-                        try:
-                            await self._bot.send_message(
-                                chat_id=chat_id, text=msg_text,
-                                parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True
-                            )
-                            await asyncio.sleep(0.5)
-                        except RetryAfter as e:
-                            await asyncio.sleep(e.retry_after)
-                            try:
-                                await self._bot.send_message(
-                                    chat_id=chat_id, text=msg_text,
-                                    parse_mode=ParseMode.MARKDOWN_V2, disable_web_page_preview=True
-                                )
-                            except Exception:
-                                pass
+                    # Use parallel batch sending instead of sequential loop
+                    await self._renderer.render_messages(self._bot, temp_job, msgs)
             else:
                 await self._batch.acquire_chat_send_lock(chat_id)
                 try:
