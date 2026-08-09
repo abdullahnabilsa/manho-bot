@@ -114,6 +114,10 @@ class DeliveryPipeline:
             api_keys=api_keys
         )
         
+        # Memory Optimization: Free RAM immediately after AI processing
+        job.image_bytes = None
+        job.image_file_id = None
+        
         job = await handler.validate_and_update_job(job, raw_json)
         if job.page_data:
             job.page_data.file_name = job.file_name
