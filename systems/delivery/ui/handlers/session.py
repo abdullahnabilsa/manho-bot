@@ -1,4 +1,4 @@
-# File: systems/delivery/ui/handlers/session.py
+# systems/delivery/ui/handlers/session.py
 from __future__ import annotations
 
 import logging
@@ -94,7 +94,6 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⚠️ *الجلسة فارغة\\.*\nلم تقم بإرسال أي صور صالحة\\. أرسل صوراً أولاً ثم أنهِ الجلسة\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
-    # Delete intake tracker
     tracker_id = await container.batch.get_tracker(user_id)
     if tracker_id:
         try:
@@ -105,7 +104,6 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     session_mode = await container.batch.get_session_mode(user_id)
     
-    # Mark as finalizing and pending compile for both modes
     await container.batch.set_finalizing(user_id, True)
     await container.batch.set_pending_compile(user_id)
     
@@ -129,7 +127,6 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await container.delivery.flush_pending_to_queue(user_id, chat_id)
         return
 
-    # Grouped mode
     context.user_data['awaiting_session_filename'] = True
     
     text = (
@@ -249,8 +246,10 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     is_active = await container.batch.is_session_active(user_id)
     is_finalizing = await container.batch.is_finalizing(user_id)
+    is_queue_active = await container.jobs.is_active_user(user_id)
     
     if not is_active and not is_finalizing and not context.user_data.get('awaiting_session_filename'):
+        await container.jobs.cancel_waiting_user(user_id)
         try:
             await update.message.delete()
         except Exception:
@@ -275,6 +274,14 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             pass
         
     await container.batch.clear_session(user_id)
+    
+    if is_queue_active:
+        next_user = await container.jobs.release_active_user()
+        if next_user:
+            next_user_id, next_chat_id = next_user
+            await container.delivery.activate_waiting_user(next_user_id, next_chat_id)
+    else:
+        await container.jobs.cancel_waiting_user(user_id)
         
     try:
         await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء العملية وحذف بيانات الجلسة بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
@@ -342,7 +349,6 @@ async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.D
     user_id = query.from_user.id
     chat_id = query.message.chat_id
     
-    # Read from the isolated cleanup cache
     photo_ids = await container.batch.get_cleanup_photo_ids(user_id)
     if not photo_ids:
         try:
@@ -351,7 +357,6 @@ async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.D
             pass
         return
         
-    # Telegram delete_messages supports up to 100 per call
     for i in range(0, len(photo_ids), 100):
         chunk = photo_ids[i:i+100]
         try:
@@ -359,7 +364,6 @@ async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.D
         except Exception as e:
             logger.warning(f"Failed to delete some messages: {e}")
             
-    # Tier 1: Immediate memory cleanup after usage
     await container.batch.clear_cleanup_photo_ids(user_id)
             
     try:

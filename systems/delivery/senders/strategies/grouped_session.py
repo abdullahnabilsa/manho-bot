@@ -1,9 +1,10 @@
-# File: systems/delivery/senders/strategies/grouped_session.py
+# systems/delivery/senders/strategies/grouped_session.py
 from __future__ import annotations
 
 import asyncio
 import logging
 import time as _time
+from typing import Optional, TYPE_CHECKING
 
 from telegram import Bot, InputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
@@ -17,6 +18,9 @@ from systems.translation_pipeline.registry import PersonaRegistry
 from systems.translation_pipeline.models.page_job import PageJob
 from utils.markdown_escaper import escape_markdown_v2, escape_html
 from utils.progress_bar import generate_progress_bar
+
+if TYPE_CHECKING:
+    from systems.delivery.pipeline import DeliveryPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,10 @@ class GroupedSessionStrategy:
         self._personas = personas
         self._queue = queue
         self._renderer = renderer
+        self._pipeline: Optional["DeliveryPipeline"] = None
+
+    def set_pipeline(self, pipeline: "DeliveryPipeline") -> None:
+        self._pipeline = pipeline
 
     async def process(self, job: PageJob, handler) -> PageJob:
         is_active = await self._batch.is_session_active(job.user_id)
@@ -108,7 +116,6 @@ class GroupedSessionStrategy:
             note_block = f"\n📝 <b>ملاحظة:</b>\n{note_html}\n" if note_html else ""
             
             if is_pending:
-                # Preserve the 100% stats, do not overwrite with "compiling" text
                 text = (
                     f"{progress_bar}\n\n"
                     f"⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
@@ -266,7 +273,6 @@ class GroupedSessionStrategy:
                 except Exception:
                     pass
 
-            # Phase 3: Persistent Log & Cleanup Engine (Enriched)
             tracker_id = await self._batch.get_tracker(user_id)
             if tracker_id:
                 try:
@@ -309,9 +315,11 @@ class GroupedSessionStrategy:
                 parse_mode=ParseMode.MARKDOWN_V2
             )
             
-        # 3-Tier Safe Cleanup: Transfer ownership before clearing session
         await self._batch.transfer_session_to_cleanup(user_id)
             
         await self._batch.clear_session(user_id)
         await self._batch.clear_pending_compile(user_id)
         await self._batch.set_finalizing(user_id, False)
+        
+        if self._pipeline:
+            await self._pipeline.activate_next_user()

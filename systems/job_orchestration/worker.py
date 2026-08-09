@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import logging
+import time
 from enum import Enum
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Tuple, List, TYPE_CHECKING
 from uuid import UUID
 
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
@@ -34,10 +36,51 @@ class JobManager:
 
         self._pipeline: Optional[PipelineProtocol] = None
         self._error_notifier: Optional[ErrorNotifierProtocol] = None
+        
+        # Phase 1: Gatekeeper State
+        self._active_user_id: Optional[int] = None
+        self._waiting_queue: List[Tuple[int, float, int, int]] = []
 
     def attach(self, pipeline: PipelineProtocol, error_notifier: ErrorNotifierProtocol) -> None:
         self._pipeline = pipeline
         self._error_notifier = error_notifier
+
+    async def request_processing(self, user_id: int, chat_id: int, image_count: int) -> bool:
+        async with self._lock:
+            if self._active_user_id is None:
+                self._active_user_id = user_id
+                return True
+            if self._active_user_id == user_id:
+                return True
+            
+            for item in self._waiting_queue:
+                if item[2] == user_id:
+                    return False
+                    
+            heapq.heappush(self._waiting_queue, (image_count, time.time(), user_id, chat_id))
+            return False
+
+    async def release_active_user(self) -> Optional[Tuple[int, int]]:
+        async with self._lock:
+            self._active_user_id = None
+            if self._waiting_queue:
+                _, _, next_user_id, next_chat_id = heapq.heappop(self._waiting_queue)
+                self._active_user_id = next_user_id
+                return next_user_id, next_chat_id
+            return None
+
+    async def is_active_user(self, user_id: int) -> bool:
+        async with self._lock:
+            return self._active_user_id == user_id
+
+    async def get_active_user(self) -> Optional[int]:
+        async with self._lock:
+            return self._active_user_id
+
+    async def cancel_waiting_user(self, user_id: int) -> None:
+        async with self._lock:
+            self._waiting_queue = [item for item in self._waiting_queue if item[2] != user_id]
+            heapq.heapify(self._waiting_queue)
 
     async def submit_job(self, job: PageJob) -> JobSubmissionResult:
         async with self._lock:
@@ -125,13 +168,17 @@ class JobManager:
                     raise
 
                 except Exception as e:
-                    job_logger.log_error(current_job_id, e)
-                    await self._transition_state(job, JobState.FAILED)
-                    if self._error_notifier:
-                        try:
-                            await self._error_notifier.notify(job, e)
-                        except Exception as notify_err:
-                            logger.error(f"Failed to send error notification: {notify_err}")
+                    error_str = str(e)
+                    if "Processing requires an active session" in error_str:
+                        logger.info(f"JobID={current_job_id} silently dropped due to session cancellation.")
+                    else:
+                        job_logger.log_error(current_job_id, e)
+                        await self._transition_state(job, JobState.FAILED)
+                        if self._error_notifier:
+                            try:
+                                await self._error_notifier.notify(job, e)
+                            except Exception as notify_err:
+                                logger.error(f"Failed to send error notification: {notify_err}")
                 
                 finally:
                     await self._queue.task_done()

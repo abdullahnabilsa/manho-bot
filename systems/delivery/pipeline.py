@@ -1,10 +1,10 @@
-# File: systems/delivery/pipeline.py
+# systems/delivery/pipeline.py
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-from typing import Callable, List
+from typing import Callable, List, Optional, Tuple
 
 from telegram import Bot
 from telegram.constants import ChatAction, ParseMode
@@ -153,10 +153,36 @@ class DeliveryPipeline:
             await self._grouped_strategy.compile_and_send(user_id, chat_id)
 
     async def flush_pending_to_queue(self, user_id: int, chat_id: int) -> None:
-        """Phase 2: Flushes cached pending files into the JobManager queue."""
+        """Phase 2: Gatekeeper check. Either flushes to queue or sends ETA waiting message."""
         pending_files = await self._batch.get_pending_files(user_id)
         if not pending_files:
             logger.warning(f"Flush called for UserID={user_id} but no pending files found.")
+            return
+
+        is_allowed = await self._jobs.request_processing(user_id, chat_id, len(pending_files))
+        
+        if not is_allowed:
+            active_user = await self._jobs.get_active_user()
+            eta_mins = 1
+            if active_user:
+                active_total = await self._batch.get_received_count(active_user)
+                active_translated = len(await self._batch.get_session_data(active_user))
+                active_queued = await self._queue.size()
+                remaining = active_total - active_translated - active_queued
+                if remaining < 0: remaining = 0
+                eta_seconds = remaining * 3
+                eta_mins = max(1, eta_seconds // 60)
+            
+            text = (
+                f"⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
+                f"تم وضعك في غرفة الانتظار. وقت الانتظار المرجح: <code>~{eta_mins} دقيقة</code>\n\n"
+                f"<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
+            )
+            try:
+                msg = await self._bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                await self._batch.set_waiting_message_id(user_id, msg.message_id)
+            except Exception as e:
+                logger.error(f"Failed to send waiting message: {e}")
             return
             
         await self._batch.clear_pending_files(user_id)
@@ -173,3 +199,23 @@ class DeliveryPipeline:
             await self._batch.increment_received_count(user_id)
             
         logger.info(f"UserID={user_id} | Flushed {len(pending_files)} pending files to queue.")
+
+    async def activate_next_user(self) -> None:
+        """Phase 3: Seamless Handoff. Called by strategies when active user finishes."""
+        next_user = await self._jobs.release_active_user()
+        if next_user:
+            next_user_id, next_chat_id = next_user
+            await self.activate_waiting_user(next_user_id, next_chat_id)
+
+    async def activate_waiting_user(self, user_id: int, chat_id: int) -> None:
+        """Phase 3 & 4: Transitions a waiting user to active and starts their queue processing."""
+        waiting_msg_id = await self._batch.get_waiting_message_id(user_id)
+        if waiting_msg_id:
+            try:
+                await self._bot.delete_message(chat_id=chat_id, message_id=waiting_msg_id)
+            except Exception:
+                pass
+            await self._batch.clear_waiting_state(user_id)
+        
+        await self._batch.force_update_tracker(user_id)
+        await self.flush_pending_to_queue(user_id, chat_id)

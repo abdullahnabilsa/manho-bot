@@ -1,4 +1,4 @@
-# File: systems/delivery/batch.py
+# systems/delivery/batch.py
 from __future__ import annotations
 
 import asyncio
@@ -47,13 +47,15 @@ class BatchManager:
         self._chat_locks: Dict[int, asyncio.Lock] = {}
         self._locks_creation_lock = asyncio.Lock()
         
+        # Waiting Room Engine Data
+        self._waiting_message_ids: Dict[int, int] = {}
+        
         self._lock = asyncio.Lock()
         self._received_counts_lock = asyncio.Lock()
 
     def _cleanup_stale_sessions(self) -> None:
         current_time = time.time()
         
-        # 1. Cleanup Stale Active Sessions
         stale_users = [
             user_id for user_id, (_, ts) in self._sessions.items()
             if current_time - ts > self.SESSION_TTL_SECONDS
@@ -76,8 +78,8 @@ class BatchManager:
             self._session_notes.pop(user_id, None)
             self._session_photo_ids.pop(user_id, None)
             self._compile_locks.discard(user_id)
+            self._waiting_message_ids.pop(user_id, None)
             
-        # 2. Cleanup Stale Pending Cleanup Data (Tier 3: TTL Failsafe)
         stale_cleanup = [
             user_id for user_id, (_, ts) in self._cleanup_photo_ids.items()
             if current_time - ts > self.CLEANUP_TTL_SECONDS
@@ -102,11 +104,10 @@ class BatchManager:
                 self._session_notes[user_id] = ""
                 self._session_photo_ids[user_id] = []
             
-            # Tier 2: Overwrite on new session
             self._cleanup_photo_ids.pop(user_id, None)
-            
             self._finalizing_users.discard(user_id)
             self._compile_locks.discard(user_id)
+            self._waiting_message_ids.pop(user_id, None)
 
     async def get_session_persona(self, user_id: int) -> Optional[str]:
         async with self._lock:
@@ -159,6 +160,7 @@ class BatchManager:
             self._session_photo_ids.pop(user_id, None)
             self._compile_locks.discard(user_id)
             self._received_counts.pop(user_id, None)
+            self._waiting_message_ids.pop(user_id, None)
 
     async def set_pending_compile(self, user_id: int) -> None:
         async with self._lock:
@@ -248,6 +250,20 @@ class BatchManager:
             self._cleanup_stale_sessions()
             return self._session_start_times.get(user_id)
 
+    # --- WAITING ROOM ENGINE ---
+
+    async def set_waiting_message_id(self, user_id: int, message_id: int) -> None:
+        async with self._lock:
+            self._waiting_message_ids[user_id] = message_id
+
+    async def get_waiting_message_id(self, user_id: int) -> Optional[int]:
+        async with self._lock:
+            return self._waiting_message_ids.get(user_id)
+
+    async def clear_waiting_state(self, user_id: int) -> None:
+        async with self._lock:
+            self._waiting_message_ids.pop(user_id, None)
+
     # --- LOCAL LOCKS ENGINE ---
 
     async def acquire_tracker_lock(self, user_id: int) -> None:
@@ -275,15 +291,10 @@ class BatchManager:
     # --- TRACKER DEBOUNCE ENGINE ---
 
     async def force_update_tracker(self, user_id: int) -> None:
-        """Forces the next tracker update to bypass the debounce check."""
         async with self._lock:
             self._force_update_tracker.add(user_id)
 
     async def can_update_tracker(self, user_id: int, debounce_sec: float = 0.8) -> bool:
-        """
-        Checks if the tracker can be updated based on the debounce time.
-        If a force update is requested, it bypasses the check and consumes the flag.
-        """
         async with self._lock:
             if user_id in self._force_update_tracker:
                 self._force_update_tracker.discard(user_id)
@@ -339,7 +350,6 @@ class BatchManager:
     # --- 3-TIER SAFE CLEANUP ENGINE ---
 
     async def transfer_session_to_cleanup(self, user_id: int) -> None:
-        """Transfers photo IDs to cleanup cache before clearing session."""
         async with self._lock:
             photo_ids = self._session_photo_ids.get(user_id, [])
             if photo_ids:
@@ -351,6 +361,5 @@ class BatchManager:
             return data[0] if data else []
 
     async def clear_cleanup_photo_ids(self, user_id: int) -> None:
-        """Tier 1: Immediate cleanup after usage."""
         async with self._lock:
             self._cleanup_photo_ids.pop(user_id, None)

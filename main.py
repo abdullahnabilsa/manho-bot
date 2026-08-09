@@ -123,6 +123,9 @@ async def post_init(app: Application) -> None:
         job_manager=job_manager
     )
     
+    grouped_strategy.set_pipeline(delivery_pipeline)
+    individual_strategy.set_pipeline(delivery_pipeline)
+    
     job_manager.attach(
         pipeline=delivery_pipeline,
         error_notifier=error_notifier
@@ -177,12 +180,10 @@ async def post_shutdown(app: Application) -> None:
 def main() -> None:
     app = ApplicationBuilder().token(settings.telegram_bot_token).post_init(post_init).post_shutdown(post_shutdown).build()
 
-    # Middleware stack (ordered by priority)
     app.add_handler(TypeHandler(Update, firewall_middleware), group=-3)
     app.add_handler(TypeHandler(Update, state_purge_middleware), group=-2)
     app.add_handler(TypeHandler(Update, session_guard_middleware), group=-1)
     
-    # Public commands
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("settings", settings_command))
@@ -191,52 +192,35 @@ def main() -> None:
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("note", set_note_command))
     
-    # Admin commands
     app.add_handler(CommandHandler("addkey", add_public_key_command))
     app.add_handler(CommandHandler("listkeys", list_public_keys_command))
     app.add_handler(CommandHandler("removekey", remove_public_key_command))
     app.add_handler(CommandHandler("uploaddict", upload_dict_command))
     app.add_handler(CommandHandler("downloaddict", download_dict_command))
     
-    # Access management commands
     app.add_handler(CommandHandler("adduser", add_user_command))
     app.add_handler(CommandHandler("removeuser", remove_user_command))
     app.add_handler(CommandHandler("listusers", list_users_command))
     app.add_handler(CommandHandler("openrequests", open_requests_command))
     app.add_handler(CommandHandler("closerequests", close_requests_command))
     
-    # Super admin commands
     app.add_handler(CommandHandler("addadmin", add_admin_command))
     app.add_handler(CommandHandler("removeadmin", remove_admin_command))
     
-    # Persistent keyboard buttons
     app.add_handler(MessageHandler(filters.Regex("⚙️ الإعدادات"), settings_command))
     app.add_handler(MessageHandler(filters.Regex("📖 المساعدة"), help_command))
     app.add_handler(MessageHandler(filters.Regex("🟢 بدء الجلسة"), start_session_command))
     app.add_handler(MessageHandler(filters.Regex("🔴 إنهاء الجلسة"), end_session_command))
     
-    # Callback query handlers (ordered by specificity)
-    # Settings callbacks
     app.add_handler(CallbackQueryHandler(settings_callback, pattern="^(open_|set_|back_|toggle_|add_|del_)"))
-    
-    # Interactive access management callbacks
     app.add_handler(CallbackQueryHandler(handle_access_callback, pattern="^adm_(sel|conf|nav)_access_"))
-    
-    # Interactive API key management callbacks
     app.add_handler(CallbackQueryHandler(handle_apikey_callback, pattern="^adm_(sel|conf|nav)_apikey_"))
-    
-    # Session callbacks
     app.add_handler(CallbackQueryHandler(handle_skip_filename, pattern="^skip_filename$"))
     app.add_handler(CallbackQueryHandler(handle_cancel_session, pattern="^cancel_session$"))
     app.add_handler(CallbackQueryHandler(handle_cleanup_photos_callback, pattern="^cleanup_photos$"))
-    
-    # Admin cancel (dismiss interactive panel)
     app.add_handler(CallbackQueryHandler(handle_admin_cancel, pattern="^adm_cancel$"))
-    
-    # Join request callbacks
     app.add_handler(CallbackQueryHandler(handle_request_callback, pattern="^(accept_req|reject_req)"))
     
-    # Message handlers
     app.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
