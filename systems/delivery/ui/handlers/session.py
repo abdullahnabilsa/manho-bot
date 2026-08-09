@@ -109,9 +109,24 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await container.batch.set_pending_compile(user_id)
     
     if session_mode == "individual":
-        flush_result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
-        
-        if flush_result == FlushResult.ALLOWED:
+        result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
+        if result == FlushResult.WAITING:
+            text = (
+                "⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
+                "تم وضعك في غرفة الانتظار.\n\n"
+                "<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
+            )
+            try:
+                msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                await container.batch.set_waiting_message_id(user_id, msg.message_id)
+            except Exception:
+                pass
+            return
+        elif result == FlushResult.QUEUE_FULL:
+            await context.bot.send_message(chat_id=chat_id, text="🚨 الضغط على النظام مرتفع جداً. يرجى المحاولة لاحقاً.")
+            await container.batch.clear_session(user_id)
+            return
+        elif result == FlushResult.ALLOWED:
             text = (
                 "⏳ <b>جاري ترجمة الصور وإرسالها فردياً...</b>\n\n"
                 "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
@@ -127,11 +142,7 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await container.batch.force_update_tracker(user_id)
             except Exception as e:
                 logger.error(f"Failed to create individual processing tracker: {e}")
-        elif flush_result == FlushResult.QUEUE_FULL:
-            await container.batch.set_finalizing(user_id, False)
-            await container.batch.clear_pending_compile(user_id)
-            await context.bot.send_message(chat_id=chat_id, text="⚠️ <b>النظام تحت ضغط شديد حالياً (الطابور ممتلئ).</b>\nيرجى المحاولة لاحقاً.", parse_mode=ParseMode.HTML)
-        return
+            return
 
     context.user_data['awaiting_session_filename'] = True
     
@@ -187,9 +198,26 @@ async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYP
         except Exception:
             pass
 
-    flush_result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
-    if flush_result == FlushResult.ALLOWED:
-        pending_files = await container.batch.get_pending_files(user_id)
+    pending_files = await container.batch.get_pending_files(user_id)
+    result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
+    
+    if result == FlushResult.WAITING:
+        text = (
+            "⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
+            "تم وضعك في غرفة الانتظار.\n\n"
+            "<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
+        )
+        try:
+            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+            await container.batch.set_waiting_message_id(user_id, msg.message_id)
+        except Exception:
+            pass
+        return
+    elif result == FlushResult.QUEUE_FULL:
+        await context.bot.send_message(chat_id=chat_id, text="🚨 الضغط على النظام مرتفع جداً. يرجى المحاولة لاحقاً.")
+        await container.batch.clear_session(user_id)
+        return
+    elif result == FlushResult.ALLOWED:
         text = (
             "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
             "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
@@ -205,11 +233,9 @@ async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYP
             await container.batch.force_update_tracker(user_id)
         except Exception as e:
             logger.error(f"Failed to create grouped processing tracker: {e}")
-    elif flush_result == FlushResult.QUEUE_FULL:
-        await container.batch.set_finalizing(user_id, False)
-        await container.batch.clear_pending_compile(user_id)
-        await context.bot.send_message(chat_id=chat_id, text="⚠️ <b>النظام تحت ضغط شديد (الطابور ممتلئ).</b>\nيرجى المحاولة لاحقاً.", parse_mode=ParseMode.HTML)
-        
+            
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
 async def handle_cancel_session(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -326,9 +352,26 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
         except Exception:
             pass
 
-    flush_result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
-    if flush_result == FlushResult.ALLOWED:
-        pending_files = await container.batch.get_pending_files(user_id)
+    pending_files = await container.batch.get_pending_files(user_id)
+    result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
+    
+    if result == FlushResult.WAITING:
+        text = (
+            "⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
+            "تم وضعك في غرفة الانتظار.\n\n"
+            "<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
+        )
+        try:
+            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+            await container.batch.set_waiting_message_id(user_id, msg.message_id)
+        except Exception:
+            pass
+        return
+    elif result == FlushResult.QUEUE_FULL:
+        await context.bot.send_message(chat_id=chat_id, text="🚨 الضغط على النظام مرتفع جداً. يرجى المحاولة لاحقاً.")
+        await container.batch.clear_session(user_id)
+        return
+    elif result == FlushResult.ALLOWED:
         text = (
             "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
             "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
@@ -344,11 +387,9 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
             await container.batch.force_update_tracker(user_id)
         except Exception as e:
             logger.error(f"Failed to create grouped processing tracker: {e}")
-    elif flush_result == FlushResult.QUEUE_FULL:
-        await container.batch.set_finalizing(user_id, False)
-        await container.batch.clear_pending_compile(user_id)
-        await context.bot.send_message(chat_id=chat_id, text="⚠️ <b>النظام تحت ضغط شديد (الطابور ممتلئ).</b>\nيرجى المحاولة لاحقاً.", parse_mode=ParseMode.HTML)
-        
+            
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
 async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Phase 3: Cleanup Engine - Deletes original photos in bulk (3-Tier Safe Cleanup)."""
     query = update.callback_query

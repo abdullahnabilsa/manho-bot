@@ -163,36 +163,13 @@ class DeliveryPipeline:
             await self._grouped_strategy.compile_and_send(user_id, chat_id)
 
     async def flush_pending_to_queue(self, user_id: int, chat_id: int) -> FlushResult:
-        """Phase 1 & 3: Pre-flight Gatekeeper & Bulletproof Queue Shielding."""
+        """Phase 1: Pre-flight Gatekeeper. Returns FlushResult to determine UI flow."""
         pending_files = await self._batch.get_pending_files(user_id)
         if not pending_files:
-            logger.warning(f"Flush called for UserID={user_id} but no pending files found.")
             return FlushResult.EMPTY
 
         is_allowed = await self._jobs.request_processing(user_id, chat_id, len(pending_files))
-        
         if not is_allowed:
-            active_user = await self._jobs.get_active_user()
-            eta_mins = 1
-            if active_user:
-                active_total = await self._batch.get_received_count(active_user)
-                active_translated = len(await self._batch.get_session_data(active_user))
-                active_queued = await self._queue.size()
-                remaining = active_total - active_translated - active_queued
-                if remaining < 0: remaining = 0
-                eta_seconds = remaining * 3
-                eta_mins = max(1, eta_seconds // 60)
-            
-            text = (
-                f"⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
-                f"تم وضعك في غرفة الانتظار. وقت الانتظار المرجح: <code>~{eta_mins} دقيقة</code>\n\n"
-                f"<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
-            )
-            try:
-                msg = await self._bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-                await self._batch.set_waiting_message_id(user_id, msg.message_id)
-            except Exception as e:
-                logger.error(f"Failed to send waiting message: {e}")
             return FlushResult.WAITING
             
         await self._batch.clear_pending_files(user_id)
@@ -207,11 +184,9 @@ class DeliveryPipeline:
             )
             result = await self._jobs.submit_job(job)
             if result == JobSubmissionResult.QUEUE_FULL:
-                logger.error(f"UserID={user_id} | Queue is full! Stopping flush.")
                 return FlushResult.QUEUE_FULL
             await self._batch.increment_received_count(user_id)
             
-        logger.info(f"UserID={user_id} | Flushed {len(pending_files)} pending files to queue.")
         return FlushResult.ALLOWED
 
     async def activate_next_user(self) -> None:
@@ -222,7 +197,7 @@ class DeliveryPipeline:
             await self.activate_waiting_user(next_user_id, next_chat_id)
 
     async def activate_waiting_user(self, user_id: int, chat_id: int) -> None:
-        """Phase 1 & 3: Transitions a waiting user to active and starts their queue processing."""
+        """Phase 3 & 4: Transitions a waiting user to active and starts their queue processing."""
         waiting_msg_id = await self._batch.get_waiting_message_id(user_id)
         if waiting_msg_id:
             try:
@@ -231,33 +206,27 @@ class DeliveryPipeline:
                 pass
             await self._batch.clear_waiting_state(user_id)
         
-        await self._batch.force_update_tracker(user_id)
-        
-        pending_files = await self._batch.get_pending_files(user_id)
-        if not pending_files:
-            return
-            
-        flush_result = await self.flush_pending_to_queue(user_id, chat_id)
-        
-        if flush_result == FlushResult.ALLOWED:
+        result = await self.flush_pending_to_queue(user_id, chat_id)
+        if result == FlushResult.ALLOWED:
+            total_received = await self._batch.get_received_count(user_id)
             text = (
-                "🚀 <b>انتهى دورك! جاري بدء الترجمة الآن...</b>\n\n"
+                "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
                 "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-                f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
+                f"• إجمالي الصور: <code>{total_received}</code>\n"
                 "• تمت ترجمتها: <code>0</code>\n"
                 "• قيد المعالجة الآن: <code>0</code>\n"
                 "• في الطابور: <code>0</code>\n\n"
-                "<i>يعمل النظام بـ 5 عمال متوازيين.</i>"
+                "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
             )
             try:
                 msg = await self._bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
                 await self._batch.set_tracker(user_id, msg.message_id)
                 await self._batch.force_update_tracker(user_id)
             except Exception as e:
-                logger.error(f"Failed to create tracker for activated user {user_id}: {e}")
-        elif flush_result == FlushResult.QUEUE_FULL:
+                logger.error(f"Failed to create tracker for waiting user: {e}")
+        elif result == FlushResult.QUEUE_FULL:
             try:
-                await self._bot.send_message(chat_id=chat_id, text="⚠️ <b>النظام تحت ضغط شديد (الطابور ممتلئ).</b>\nيرجى المحاولة لاحقاً.", parse_mode=ParseMode.HTML)
+                await self._bot.send_message(chat_id=chat_id, text="🚨 الضغط على النظام مرتفع جداً. يرجى المحاولة لاحقاً.")
             except Exception:
                 pass
 

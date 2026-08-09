@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple, Set, Optional
 from systems.translation_pipeline.models.page_data import PageData
 
 class BatchManager:
-    """Manages in-memory batch sessions for users (Lock-Free for memory operations)."""
+    """Manages in-memory batch sessions for users."""
     SESSION_TTL_SECONDS = 1800
     CLEANUP_TTL_SECONDS = 3600  # 1 Hour for cleanup data
 
@@ -30,7 +30,7 @@ class BatchManager:
         
         # Smart Intake Data
         self._session_notes: Dict[int, str] = {}
-        self._session_photo_ids: Dict[int, List[int]] = []
+        self._session_photo_ids: Dict[int, List[int]] = {}
         
         # 3-Tier Safe Cleanup Engine
         self._cleanup_photo_ids: Dict[int, Tuple[List[int], float]] = {}
@@ -42,7 +42,7 @@ class BatchManager:
         self._last_tracker_updates: Dict[int, float] = {}
         self._force_update_tracker: Set[int] = set()
         
-        # Local In-Memory Locks (Only for Telegram I/O to prevent Flood Controls)
+        # Local In-Memory Locks
         self._tracker_locks: Dict[int, asyncio.Lock] = {}
         self._chat_locks: Dict[int, asyncio.Lock] = {}
         self._locks_creation_lock = asyncio.Lock()
@@ -232,7 +232,7 @@ class BatchManager:
     async def clear_waiting_state(self, user_id: int) -> None:
         self._waiting_message_ids.pop(user_id, None)
 
-    # --- LOCAL LOCKS ENGINE (Only for Telegram I/O) ---
+    # --- LOCAL LOCKS ENGINE ---
 
     async def acquire_tracker_lock(self, user_id: int) -> None:
         async with self._locks_creation_lock:
