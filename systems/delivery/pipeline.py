@@ -35,7 +35,7 @@ class FlushResult(Enum):
     QUEUE_FULL = 4
 
 class DeliveryPipeline:
-    """Facade implementing PipelineProtocol. Orchestrates AI → Render → Send."""
+    """Facade implementing PipelineProtocol. Orchestrates AI → Render → Deliver."""
     
     def __init__(
         self,
@@ -67,11 +67,8 @@ class DeliveryPipeline:
         self._env_settings = Settings()
 
     async def process(self, job: PageJob) -> PageJob:
-        await self._bot.send_chat_action(chat_id=job.chat_id, action=ChatAction.TYPING)
-        
         is_session_active = await self._batch.is_session_active(job.user_id)
         if not is_session_active:
-            logger.error(f"JobID={job.job_id} | Processing started without an active session. Aborting.")
             raise RuntimeError("Processing requires an active session.")
 
         if not job.image_bytes and job.image_file_id:
@@ -79,10 +76,8 @@ class DeliveryPipeline:
                 tg_file = await asyncio.wait_for(self._bot.get_file(job.image_file_id), timeout=30.0)
                 job.image_bytes = await asyncio.wait_for(tg_file.download_as_bytearray(), timeout=30.0)
             except asyncio.TimeoutError:
-                logger.error(f"JobID={job.job_id} | Telegram file download timed out after 30s.")
                 raise RuntimeError(f"Telegram download timeout for JobID={job.job_id}")
             except Exception as e:
-                logger.error(f"JobID={job.job_id} | Failed to download image: {e}")
                 raise RuntimeError(f"Failed to download image file: {e}")
 
         if job.image_bytes:
@@ -138,22 +133,17 @@ class DeliveryPipeline:
         ]
         return job
 
-    async def send(self, job: PageJob) -> PageJob:
-        await self._bot.send_chat_action(chat_id=job.chat_id, action=ChatAction.UPLOAD_DOCUMENT)
-        
-        persona_name = await self._settings.get_persona(job.user_id)
-        handler = self._personas.get_handler(persona_name)
-        
+    async def deliver(self, job: PageJob) -> PageJob:
         if not await self._batch.is_session_active(job.user_id):
-            logger.info(f"JobID={job.job_id} | Session expired or cancelled before sending.")
+            logger.info(f"JobID={job.job_id} | Session expired or cancelled before delivery.")
             return job
 
         session_mode = await self._batch.get_session_mode(job.user_id)
         
         if session_mode == "individual":
-            return await self._individual_strategy.process(job, handler)
+            return await self._individual_strategy.process(job, handler=None)
         else:
-            return await self._grouped_strategy.process(job, handler)
+            return await self._grouped_strategy.process(job, handler=None)
 
     async def compile_session(self, user_id: int, chat_id: int) -> None:
         session_mode = await self._batch.get_session_mode(user_id)
@@ -163,7 +153,6 @@ class DeliveryPipeline:
             await self._grouped_strategy.compile_and_send(user_id, chat_id)
 
     async def flush_pending_to_queue(self, user_id: int, chat_id: int) -> FlushResult:
-        """Phase 1: Pre-flight Gatekeeper. Returns FlushResult to determine UI flow."""
         pending_files = await self._batch.get_pending_files(user_id)
         if not pending_files:
             return FlushResult.EMPTY
@@ -190,14 +179,12 @@ class DeliveryPipeline:
         return FlushResult.ALLOWED
 
     async def activate_next_user(self) -> None:
-        """Phase 3: Seamless Handoff. Called by strategies when active user finishes."""
         next_user = await self._jobs.release_active_user()
         if next_user:
             next_user_id, next_chat_id = next_user
             await self.activate_waiting_user(next_user_id, next_chat_id)
 
     async def activate_waiting_user(self, user_id: int, chat_id: int) -> None:
-        """Phase 3 & 4: Transitions a waiting user to active and starts their queue processing."""
         waiting_msg_id = await self._batch.get_waiting_message_id(user_id)
         if waiting_msg_id:
             try:
@@ -231,7 +218,6 @@ class DeliveryPipeline:
                 pass
 
     async def finalize_session_and_advance(self, user_id: int, chat_id: int) -> None:
-        """Phase 2: Bulletproof Handoff. Ensures next user is activated even if delivery fails."""
         try:
             await self._batch.clear_session(user_id)
             await self._batch.clear_pending_compile(user_id)

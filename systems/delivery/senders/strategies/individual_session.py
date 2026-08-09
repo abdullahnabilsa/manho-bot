@@ -14,6 +14,7 @@ from systems.delivery.renderers.telegram import TelegramRenderer
 from systems.delivery.batch import BatchManager
 from systems.access_control.user_settings import UserSettingsManager
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
+from systems.job_orchestration.worker import JobManager
 from systems.translation_pipeline.registry import PersonaRegistry
 from systems.translation_pipeline.models.page_job import PageJob
 from utils.markdown_escaper import escape_markdown_v2, escape_html
@@ -32,7 +33,8 @@ class IndividualSessionStrategy:
         settings: UserSettingsManager,
         personas: PersonaRegistry,
         queue: AsyncSingleWorkerQueue,
-        renderer: TelegramRenderer
+        renderer: TelegramRenderer,
+        jobs: JobManager
     ) -> None:
         self._bot = bot
         self._batch = batch
@@ -40,6 +42,7 @@ class IndividualSessionStrategy:
         self._personas = personas
         self._queue = queue
         self._renderer = renderer
+        self._jobs = jobs
         self._pipeline: Optional["DeliveryPipeline"] = None
 
     def set_pipeline(self, pipeline: "DeliveryPipeline") -> None:
@@ -52,7 +55,11 @@ class IndividualSessionStrategy:
             return job
 
         total_pages = await self._batch.add_page_data(job.user_id, job.page_data)
-        queue_size = await self._queue.size()
+        
+        ai_q_size = await self._jobs.get_ai_queue_size()
+        del_q_size = await self._jobs.get_delivery_queue_size()
+        queue_size = ai_q_size + del_q_size
+        
         total_received = await self._batch.get_received_count(job.user_id)
         processing_count = total_received - total_pages - queue_size
         if processing_count < 0:
@@ -69,9 +76,13 @@ class IndividualSessionStrategy:
         
         session_note = await self._batch.get_session_note(job.user_id)
         
+        # Fetch handler for file generation
+        persona_name = await self._batch.get_session_persona(job.user_id)
+        file_handler = self._personas.get_handler(persona_name)
+        
         if output_method in ["messages_only", "messages_and_files"]:
             temp_job = PageJob(user_id=job.user_id, chat_id=job.chat_id, page_data=job.page_data, file_name=job.file_name)
-            msgs = await handler.paginate(temp_job, mode=mode)
+            msgs = await file_handler.paginate(temp_job, mode=mode)
             strings = [m for m in msgs]
             await self._renderer.render_messages(self._bot, temp_job, strings)
             
@@ -80,7 +91,7 @@ class IndividualSessionStrategy:
             try:
                 await self._batch.acquire_chat_send_lock(job.chat_id)
                 if fmt in ["txt", "both"]:
-                    file_io = await asyncio.to_thread(handler.generate_txt, [job.page_data], session_note)
+                    file_io = await asyncio.to_thread(file_handler.generate_txt, [job.page_data], session_note)
                     try:
                         await asyncio.wait_for(
                             self._bot.send_document(
@@ -105,7 +116,7 @@ class IndividualSessionStrategy:
                     except asyncio.TimeoutError:
                         raise RuntimeError("Telegram document send timed out.")
                 if fmt in ["docx", "both"]:
-                    file_io = await asyncio.to_thread(handler.generate_docx, [job.page_data], session_note)
+                    file_io = await asyncio.to_thread(file_handler.generate_docx, [job.page_data], session_note)
                     try:
                         await asyncio.wait_for(
                             self._bot.send_document(

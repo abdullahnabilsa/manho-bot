@@ -21,14 +21,17 @@ class JobSubmissionResult(Enum):
     QUEUE_FULL = 2
 
 class JobManager:
-    STATIC_WORKERS_COUNT: int = 5
+    STATIC_AI_WORKERS: int = 4
+    STATIC_DELIVERY_WORKERS: int = 1
 
     def __init__(
         self, 
-        queue_manager: AsyncSingleWorkerQueue, 
+        ai_queue: AsyncSingleWorkerQueue,
+        delivery_queue: AsyncSingleWorkerQueue,
         post_job_delay: int = 0
     ) -> None:
-        self._queue = queue_manager
+        self._ai_queue = ai_queue
+        self._delivery_queue = delivery_queue
         self._registry: dict[UUID, PageJob] = {}
         self._lock = asyncio.Lock()
         self._worker_tasks: list[asyncio.Task] = []
@@ -84,14 +87,14 @@ class JobManager:
 
     async def submit_job(self, job: PageJob) -> JobSubmissionResult:
         async with self._lock:
-            if self._queue.is_full():
+            if self._ai_queue.is_full():
                 return JobSubmissionResult.QUEUE_FULL
             self._registry[job.job_id] = job
         
         job_logger.log_received(job.job_id, job.user_id)
         
         try:
-            self._queue.enqueue_nowait(job.job_id)
+            self._ai_queue.enqueue_nowait(job.job_id)
         except asyncio.QueueFull:
             async with self._lock:
                 del self._registry[job.job_id]
@@ -103,12 +106,21 @@ class JobManager:
         async with self._lock:
             return self._registry.get(job_id)
 
+    async def get_ai_queue_size(self) -> int:
+        return await self._ai_queue.size()
+
+    async def get_delivery_queue_size(self) -> int:
+        return await self._delivery_queue.size()
+
     async def start(self) -> None:
         if not self._worker_tasks:
-            for i in range(self.STATIC_WORKERS_COUNT):
-                task = asyncio.create_task(self._worker_loop(i + 1))
+            for i in range(self.STATIC_AI_WORKERS):
+                task = asyncio.create_task(self._ai_worker_loop(i + 1))
                 self._worker_tasks.append(task)
-            logger.info(f"Static Worker Pool initialized with {self.STATIC_WORKERS_COUNT} workers.")
+            for i in range(self.STATIC_DELIVERY_WORKERS):
+                task = asyncio.create_task(self._delivery_worker_loop(i + 1))
+                self._worker_tasks.append(task)
+            logger.info(f"Worker Pool initialized: {self.STATIC_AI_WORKERS} AI, {self.STATIC_DELIVERY_WORKERS} Delivery.")
 
     async def stop(self) -> None:
         for task in self._worker_tasks:
@@ -120,19 +132,18 @@ class JobManager:
                 pass
         self._worker_tasks.clear()
 
-    async def _worker_loop(self, worker_id: int) -> None:
+    async def _ai_worker_loop(self, worker_id: int) -> None:
         try:
             while True:
-                current_job_id = await self._queue.dequeue()
+                current_job_id = await self._ai_queue.dequeue()
                 job = await self.get_job(current_job_id)
 
                 if not job or not self._pipeline:
                     job_logger.log_error(current_job_id, RuntimeError("Job missing or pipeline not attached"))
-                    await self._queue.task_done()
+                    await self._ai_queue.task_done()
                     continue
 
                 job_logger.log_started(current_job_id)
-                job_completed_successfully = False
                 
                 try:
                     await self._transition_state(job, JobState.PROCESSING)
@@ -141,29 +152,18 @@ class JobManager:
                     await self._transition_state(job, JobState.RENDERING)
                     job = await self._pipeline.render(job)
 
-                    await self._transition_state(job, JobState.SENDING)
-                    job = await self._pipeline.send(job)
-
-                    await self._transition_state(job, JobState.FINISHED)
-                    
-                    scene_count = len(job.page_data.scenes) if job.page_data else 0
-                    element_count = sum(len(s.elements) for s in job.page_data.scenes) if job.page_data else 0
-                    job_logger.log_completed(current_job_id, scene_count, element_count)
-                    job_completed_successfully = True
+                    # Pass to Delivery Queue
+                    await self._delivery_queue.enqueue(job.job_id)
 
                 except asyncio.CancelledError:
-                    logger.warning(f"Worker {worker_id} cancelled during JobID={current_job_id}. Re-enqueuing...")
+                    logger.warning(f"AI Worker {worker_id} cancelled during JobID={current_job_id}. Re-enqueuing...")
                     try:
                         async with self._lock:
                             job.state = JobState.WAITING
                             self._registry[job.job_id] = job
-                        self._queue.enqueue_nowait(current_job_id)
-                        logger.info(f"JobID={current_job_id} re-enqueued successfully.")
+                        self._ai_queue.enqueue_nowait(current_job_id)
                     except asyncio.QueueFull:
-                        logger.error(f"Failed to re-enqueue JobID={current_job_id}: Queue is full! Job is lost.")
-                        job.state = JobState.FAILED
-                    except Exception as e:
-                        logger.error(f"Failed to re-enqueue JobID={current_job_id}: {e}. Job is lost.")
+                        logger.error(f"Failed to re-enqueue JobID={current_job_id}: Queue is full!")
                         job.state = JobState.FAILED
                     raise
 
@@ -171,26 +171,60 @@ class JobManager:
                     error_str = str(e)
                     if "Processing requires an active session" in error_str:
                         logger.info(f"JobID={current_job_id} silently dropped due to session cancellation.")
+                        async with self._lock:
+                            self._registry.pop(job.job_id, None)
                     else:
                         job_logger.log_error(current_job_id, e)
                         await self._transition_state(job, JobState.FAILED)
-                        if self._error_notifier:
-                            try:
-                                await self._error_notifier.notify(job, e)
-                            except Exception as notify_err:
-                                logger.error(f"Failed to send error notification: {notify_err}")
+                        job.error = str(e)
+                        # Route to delivery to notify user of failure
+                        await self._delivery_queue.enqueue(job.job_id)
                 
                 finally:
-                    await self._queue.task_done()
+                    await self._ai_queue.task_done()
                     
-                    if job_completed_successfully or job.state == JobState.FAILED:
+        except asyncio.CancelledError:
+            logger.info(f"AI Worker {worker_id} gracefully shut down.")
+            return
+
+    async def _delivery_worker_loop(self, worker_id: int) -> None:
+        try:
+            while True:
+                current_job_id = await self._delivery_queue.dequeue()
+                job = await self.get_job(current_job_id)
+
+                if not job or not self._pipeline:
+                    await self._delivery_queue.task_done()
+                    continue
+
+                try:
+                    if job.state == JobState.FAILED or job.error:
+                        if self._error_notifier:
+                            try:
+                                await self._error_notifier.notify(job, RuntimeError(job.error or "Unknown AI Error"))
+                            except Exception as notify_err:
+                                logger.error(f"Failed to send error notification: {notify_err}")
+                    else:
+                        await self._transition_state(job, JobState.SENDING)
+                        job = await self._pipeline.deliver(job)
+                        await self._transition_state(job, JobState.FINISHED)
+                        job_logger.log_completed(current_job_id, 0, 0)
+
+                except Exception as e:
+                    logger.error(f"Delivery failed for JobID={current_job_id}: {e}", exc_info=True)
+                    await self._transition_state(job, JobState.FAILED)
+                
+                finally:
+                    await self._delivery_queue.task_done()
+                    # Cleanup registry if not re-enqueued or waiting
+                    if job.state in [JobState.FINISHED, JobState.FAILED]:
                         async with self._lock:
                             self._registry.pop(job.job_id, None)
                     
                     await asyncio.sleep(self.POST_JOB_DELAY_SECONDS)
                     
         except asyncio.CancelledError:
-            logger.info(f"Worker {worker_id} gracefully shut down.")
+            logger.info(f"Delivery Worker {worker_id} gracefully shut down.")
             return
 
     async def _transition_state(self, job: PageJob, new_state: JobState) -> None:

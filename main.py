@@ -85,10 +85,12 @@ async def post_init(app: Application) -> None:
     
     persona_registry = PersonaRegistry(plugins_dir="systems/translation_pipeline/plugins")
     
-    queue_manager = AsyncSingleWorkerQueue(max_size=settings.queue_max_size)
+    ai_queue = AsyncSingleWorkerQueue(max_size=settings.queue_max_size)
+    delivery_queue = AsyncSingleWorkerQueue(max_size=settings.queue_max_size)
     
     job_manager = JobManager(
-        queue_manager=queue_manager, 
+        ai_queue=ai_queue,
+        delivery_queue=delivery_queue,
         post_job_delay=settings.post_job_delay_seconds
     )
     
@@ -97,12 +99,14 @@ async def post_init(app: Application) -> None:
     
     grouped_strategy = GroupedSessionStrategy(
         bot=bot, batch=batch_manager, settings=settings_manager,
-        personas=persona_registry, queue=queue_manager, renderer=telegram_renderer
+        personas=persona_registry, queue=ai_queue, renderer=telegram_renderer,
+        jobs=job_manager
     )
     
     individual_strategy = IndividualSessionStrategy(
         bot=bot, batch=batch_manager, settings=settings_manager,
-        personas=persona_registry, queue=queue_manager, renderer=telegram_renderer
+        personas=persona_registry, queue=ai_queue, renderer=telegram_renderer,
+        jobs=job_manager
     )
     
     error_notifier = BotErrorNotifier(bot=bot)
@@ -118,7 +122,7 @@ async def post_init(app: Application) -> None:
         grouped_strategy=grouped_strategy,
         individual_strategy=individual_strategy,
         image_optimizer=optimize_image,
-        queue_manager=queue_manager,
+        queue_manager=ai_queue,
         glossary_manager=glossary_manager,
         job_manager=job_manager
     )
@@ -135,7 +139,7 @@ async def post_init(app: Application) -> None:
         db=db, bot=bot, event_bus=event_bus,
         access=access_manager, api_keys=api_key_manager, settings=settings_manager,
         ai=ai_provider, personas=persona_registry,
-        queue=queue_manager, jobs=job_manager,
+        queue=ai_queue, jobs=job_manager,
         batch=batch_manager, renderer=telegram_renderer,
         delivery=delivery_pipeline, notifier=error_notifier,
         glossary=glossary_manager
@@ -175,6 +179,7 @@ async def post_shutdown(app: Application) -> None:
     container: ServiceContainer = app.bot_data.get("container")
     if container:
         await container.jobs.stop()
+        await container.ai.close()
         await container.db.close()
 
 def main() -> None:
@@ -225,7 +230,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image))
 
-    logger.info("Starting Manga Translation Bot with Sequential Processing Engine...")
+    logger.info("Starting Manga Translation Bot with 4+1 Decoupled Pipeline Engine...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
