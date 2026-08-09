@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from enum import Enum
 from typing import Callable, List, Optional, Tuple
 
 from telegram import Bot
@@ -19,13 +20,19 @@ from systems.delivery.senders.strategies.grouped_session import GroupedSessionSt
 from systems.delivery.senders.strategies.individual_session import IndividualSessionStrategy
 from systems.delivery.utils import safe_edit_or_send
 from systems.job_orchestration.queue import AsyncSingleWorkerQueue
-from systems.job_orchestration.worker import JobManager
+from systems.job_orchestration.worker import JobManager, JobSubmissionResult
 from systems.job_orchestration.contracts import PipelineProtocol
 from systems.translation_pipeline.models.page_job import PageJob, MessagePayload
 from systems.glossary.manager import GlossaryManager
 from utils.markdown_escaper import escape_markdown_v2
 
 logger = logging.getLogger(__name__)
+
+class FlushResult(Enum):
+    ALLOWED = 1
+    WAITING = 2
+    EMPTY = 3
+    QUEUE_FULL = 4
 
 class DeliveryPipeline:
     """Facade implementing PipelineProtocol. Orchestrates AI → Render → Send."""
@@ -155,12 +162,12 @@ class DeliveryPipeline:
         else:
             await self._grouped_strategy.compile_and_send(user_id, chat_id)
 
-    async def flush_pending_to_queue(self, user_id: int, chat_id: int) -> None:
-        """Phase 2: Gatekeeper check. Either flushes to queue or sends ETA waiting message."""
+    async def flush_pending_to_queue(self, user_id: int, chat_id: int) -> FlushResult:
+        """Phase 1 & 3: Pre-flight Gatekeeper & Bulletproof Queue Shielding."""
         pending_files = await self._batch.get_pending_files(user_id)
         if not pending_files:
             logger.warning(f"Flush called for UserID={user_id} but no pending files found.")
-            return
+            return FlushResult.EMPTY
 
         is_allowed = await self._jobs.request_processing(user_id, chat_id, len(pending_files))
         
@@ -186,7 +193,7 @@ class DeliveryPipeline:
                 await self._batch.set_waiting_message_id(user_id, msg.message_id)
             except Exception as e:
                 logger.error(f"Failed to send waiting message: {e}")
-            return
+            return FlushResult.WAITING
             
         await self._batch.clear_pending_files(user_id)
         
@@ -198,10 +205,14 @@ class DeliveryPipeline:
                 file_name=file_name,
                 photo_message_id=photo_msg_id
             )
-            await self._jobs.submit_job(job)
+            result = await self._jobs.submit_job(job)
+            if result == JobSubmissionResult.QUEUE_FULL:
+                logger.error(f"UserID={user_id} | Queue is full! Stopping flush.")
+                return FlushResult.QUEUE_FULL
             await self._batch.increment_received_count(user_id)
             
         logger.info(f"UserID={user_id} | Flushed {len(pending_files)} pending files to queue.")
+        return FlushResult.ALLOWED
 
     async def activate_next_user(self) -> None:
         """Phase 3: Seamless Handoff. Called by strategies when active user finishes."""
@@ -211,7 +222,7 @@ class DeliveryPipeline:
             await self.activate_waiting_user(next_user_id, next_chat_id)
 
     async def activate_waiting_user(self, user_id: int, chat_id: int) -> None:
-        """Phase 3 & 4: Transitions a waiting user to active and starts their queue processing."""
+        """Phase 1 & 3: Transitions a waiting user to active and starts their queue processing."""
         waiting_msg_id = await self._batch.get_waiting_message_id(user_id)
         if waiting_msg_id:
             try:
@@ -221,7 +232,34 @@ class DeliveryPipeline:
             await self._batch.clear_waiting_state(user_id)
         
         await self._batch.force_update_tracker(user_id)
-        await self.flush_pending_to_queue(user_id, chat_id)
+        
+        pending_files = await self._batch.get_pending_files(user_id)
+        if not pending_files:
+            return
+            
+        flush_result = await self.flush_pending_to_queue(user_id, chat_id)
+        
+        if flush_result == FlushResult.ALLOWED:
+            text = (
+                "🚀 <b>انتهى دورك! جاري بدء الترجمة الآن...</b>\n\n"
+                "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
+                "• تمت ترجمتها: <code>0</code>\n"
+                "• قيد المعالجة الآن: <code>0</code>\n"
+                "• في الطابور: <code>0</code>\n\n"
+                "<i>يعمل النظام بـ 5 عمال متوازيين.</i>"
+            )
+            try:
+                msg = await self._bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                await self._batch.set_tracker(user_id, msg.message_id)
+                await self._batch.force_update_tracker(user_id)
+            except Exception as e:
+                logger.error(f"Failed to create tracker for activated user {user_id}: {e}")
+        elif flush_result == FlushResult.QUEUE_FULL:
+            try:
+                await self._bot.send_message(chat_id=chat_id, text="⚠️ <b>النظام تحت ضغط شديد (الطابور ممتلئ).</b>\nيرجى المحاولة لاحقاً.", parse_mode=ParseMode.HTML)
+            except Exception:
+                pass
 
     async def finalize_session_and_advance(self, user_id: int, chat_id: int) -> None:
         """Phase 2: Bulletproof Handoff. Ensures next user is activated even if delivery fails."""
