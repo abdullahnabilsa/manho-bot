@@ -26,6 +26,13 @@ from systems.translation_pipeline.models.page_job import PageJob, MessagePayload
 from systems.glossary.manager import GlossaryManager
 from utils.markdown_escaper import escape_markdown_v2
 
+try:
+    import orjson
+    USE_ORJSON = True
+except ImportError:
+    import json
+    USE_ORJSON = False
+
 logger = logging.getLogger(__name__)
 
 class FlushResult(Enum):
@@ -73,15 +80,16 @@ class DeliveryPipeline:
 
         if not job.image_bytes and job.image_file_id:
             try:
-                tg_file = await asyncio.wait_for(self._bot.get_file(job.image_file_id), timeout=30.0)
-                job.image_bytes = await asyncio.wait_for(tg_file.download_as_bytearray(), timeout=30.0)
+                tg_file = await asyncio.wait_for(self._bot.get_file(job.image_file_id), timeout=15.0)
+                job.image_bytes = await asyncio.wait_for(tg_file.download_as_bytearray(), timeout=20.0)
             except asyncio.TimeoutError:
                 raise RuntimeError(f"Telegram download timeout for JobID={job.job_id}")
             except Exception as e:
                 raise RuntimeError(f"Failed to download image file: {e}")
 
         if job.image_bytes:
-            job.image_bytes = self._image_optimizer(job.image_bytes)
+            # Threaded CPU Offloading: Prevent Pillow from blocking the Event Loop
+            job.image_bytes = await asyncio.to_thread(self._image_optimizer, job.image_bytes)
 
         persona_name = await self._settings.get_persona(job.user_id)
         if not persona_name or persona_name not in self._personas.get_available_personas():
@@ -96,7 +104,10 @@ class DeliveryPipeline:
         if use_glossary:
             glossary_data = await self._glossary.load_glossary()
             if glossary_data:
-                glossary_str = json.dumps(glossary_data, ensure_ascii=False, indent=2)
+                if USE_ORJSON:
+                    glossary_str = orjson.dumps(glossary_data, option=orjson.OPT_INDENT_2).decode('utf-8')
+                else:
+                    glossary_str = json.dumps(glossary_data, ensure_ascii=False, indent=2)
                 prompt_text += f"\n\n# GLOSSARY\nYou MUST strictly use the following dictionary for translating the corresponding terms. If a word from the image exists in this glossary, you must use its exact provided translation:\n{glossary_str}\n"
         
         api_keys = await self._api_keys.get_keys_for_user(job.user_id)

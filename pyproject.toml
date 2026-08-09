@@ -11,6 +11,7 @@ dependencies = [
     "python-docx>=1.0.0",
     "Pillow>=10.0.0",
     "aiosqlite>=0.19.0",
+    "orjson>=3.9.0",
 ]
 
 [project.optional-dependencies]
@@ -23,3 +24,9 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

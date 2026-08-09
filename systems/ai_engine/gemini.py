@@ -3,13 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 import aiohttp
+
+try:
+    import orjson
+    USE_ORJSON = True
+except ImportError:
+    import json
+    USE_ORJSON = False
 
 from systems.ai_engine.base import BaseAIProvider
 from systems.ai_engine.exceptions import ServiceUnavailableError, AIProcessingError
@@ -30,10 +36,10 @@ class GeminiProvider(BaseAIProvider):
         "gemini-2.5-flash-lite",
     ]
 
-    MAX_RETRIES_PER_MODEL = 2
-    RETRY_DELAY_SECONDS = 1.0
+    MAX_RETRIES_PER_MODEL = 1
+    RETRY_DELAY_SECONDS = 0.5
 
-    def __init__(self, timeout: float = 60.0, cb_threshold: int = 5, cb_cooldown: int = 60) -> None:
+    def __init__(self, timeout: float = 45.0, cb_threshold: int = 5, cb_cooldown: int = 60) -> None:
         self._base_url = "https://generativelanguage.googleapis.com/v1beta/models"
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: Optional[aiohttp.ClientSession] = None
@@ -180,7 +186,15 @@ class GeminiProvider(BaseAIProvider):
                     raise ValueError("No parts found in response content.")
 
                 raw_text = parts[0].get("text", "{}")
-                return json.loads(raw_text)
+                
+                if USE_ORJSON:
+                    return orjson.loads(raw_text)
+                else:
+                    return json.loads(raw_text)
 
-            except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
+            except (ValueError, KeyError, IndexError) as e:
                 raise ValueError(f"Failed to parse JSON response from {model_name}: {str(e)}") from e
+            except Exception as e:
+                if USE_ORJSON:
+                    raise ValueError(f"orjson decode error: {str(e)}") from e
+                raise ValueError(f"json decode error: {str(e)}") from e

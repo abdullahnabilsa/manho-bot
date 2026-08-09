@@ -252,6 +252,7 @@ class GroupedSessionStrategy:
                 await self._batch.acquire_chat_send_lock(chat_id)
                 try:
                     if fmt in ["txt", "both"]:
+                        # Strict CPU Offloading
                         file_io = await asyncio.to_thread(handler.generate_txt, session_data, session_note)
                         try:
                             await asyncio.wait_for(
@@ -275,6 +276,7 @@ class GroupedSessionStrategy:
                             raise RuntimeError("Telegram document send timed out.")
 
                     if fmt in ["docx", "both"]:
+                        # Strict CPU Offloading
                         file_io = await asyncio.to_thread(handler.generate_docx, session_data, session_note)
                         try:
                             await asyncio.wait_for(
