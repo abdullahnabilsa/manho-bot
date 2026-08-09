@@ -82,37 +82,53 @@ class IndividualSessionStrategy:
                 if fmt in ["txt", "both"]:
                     file_io = await asyncio.to_thread(handler.generate_txt, [job.page_data], session_note)
                     try:
-                        await self._bot.send_document(
-                            chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.txt"),
-                            reply_to_message_id=job.photo_message_id
+                        await asyncio.wait_for(
+                            self._bot.send_document(
+                                chat_id=job.chat_id,
+                                document=InputFile(file_io, filename=f"{base_filename}.txt"),
+                                reply_to_message_id=job.photo_message_id
+                            ),
+                            timeout=60.0
                         )
                         await asyncio.sleep(0.5)
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
                         file_io.seek(0)
-                        await self._bot.send_document(
-                            chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.txt"),
-                            reply_to_message_id=job.photo_message_id
+                        await asyncio.wait_for(
+                            self._bot.send_document(
+                                chat_id=job.chat_id,
+                                document=InputFile(file_io, filename=f"{base_filename}.txt"),
+                                reply_to_message_id=job.photo_message_id
+                            ),
+                            timeout=60.0
                         )
+                    except asyncio.TimeoutError:
+                        raise RuntimeError("Telegram document send timed out.")
                 if fmt in ["docx", "both"]:
                     file_io = await asyncio.to_thread(handler.generate_docx, [job.page_data], session_note)
                     try:
-                        await self._bot.send_document(
-                            chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.docx"),
-                            reply_to_message_id=job.photo_message_id
+                        await asyncio.wait_for(
+                            self._bot.send_document(
+                                chat_id=job.chat_id,
+                                document=InputFile(file_io, filename=f"{base_filename}.docx"),
+                                reply_to_message_id=job.photo_message_id
+                            ),
+                            timeout=60.0
                         )
                         await asyncio.sleep(0.5)
                     except RetryAfter as e:
                         await asyncio.sleep(e.retry_after)
                         file_io.seek(0)
-                        await self._bot.send_document(
-                            chat_id=job.chat_id,
-                            document=InputFile(file_io, filename=f"{base_filename}.docx"),
-                            reply_to_message_id=job.photo_message_id
+                        await asyncio.wait_for(
+                            self._bot.send_document(
+                                chat_id=job.chat_id,
+                                document=InputFile(file_io, filename=f"{base_filename}.docx"),
+                                reply_to_message_id=job.photo_message_id
+                            ),
+                            timeout=60.0
                         )
+                    except asyncio.TimeoutError:
+                        raise RuntimeError("Telegram document send timed out.")
             finally:
                 await self._batch.release_chat_send_lock(job.chat_id)
 
@@ -162,9 +178,12 @@ class IndividualSessionStrategy:
                 
             if tracker_id:
                 try:
-                    await self._bot.edit_message_text(
-                        chat_id=job.chat_id, message_id=tracker_id,
-                        text=text, parse_mode=ParseMode.HTML
+                    await asyncio.wait_for(
+                        self._bot.edit_message_text(
+                            chat_id=job.chat_id, message_id=tracker_id,
+                            text=text, parse_mode=ParseMode.HTML
+                        ),
+                        timeout=15.0
                     )
                     return
                 except BadRequest as e:
@@ -179,22 +198,33 @@ class IndividualSessionStrategy:
                 except RetryAfter as e:
                     await asyncio.sleep(e.retry_after)
                     try:
-                        await self._bot.edit_message_text(
-                            chat_id=job.chat_id, message_id=tracker_id,
-                            text=text, parse_mode=ParseMode.HTML
+                        await asyncio.wait_for(
+                            self._bot.edit_message_text(
+                                chat_id=job.chat_id, message_id=tracker_id,
+                                text=text, parse_mode=ParseMode.HTML
+                            ),
+                            timeout=15.0
                         )
                     except Exception:
                         pass
+                    return
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout editing tracker for user {job.user_id}")
                     return
                 except Exception:
                     return
                 
             if not tracker_id:
                 try:
-                    msg = await self._bot.send_message(
-                        chat_id=job.chat_id, text=text, parse_mode=ParseMode.HTML
+                    msg = await asyncio.wait_for(
+                        self._bot.send_message(
+                            chat_id=job.chat_id, text=text, parse_mode=ParseMode.HTML
+                        ),
+                        timeout=15.0
                     )
                     await self._batch.set_tracker(job.user_id, msg.message_id)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout sending new tracker for user {job.user_id}")
                 except Exception as e:
                     logger.error(f"Failed to create new individual tracker: {e}")
         finally:
@@ -222,26 +252,25 @@ class IndividualSessionStrategy:
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🗑️ حذف الصور الأصلية", callback_data="cleanup_photos")]
                 ])
-                await self._bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=tracker_id,
-                    text=(
-                        f"✅ <b>اكتملت الجلسة الفردية بنجاح!</b>\n\n"
-                        f"🖼️ <b>عدد الصور:</b> <code>{len(session_data)}</code>\n"
-                        f"📝 <b>الملاحظة:</b>\n{note_html}\n\n"
-                        f"{files_block}"
+                await asyncio.wait_for(
+                    self._bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=tracker_id,
+                        text=(
+                            f"✅ <b>اكتملت الجلسة الفردية بنجاح!</b>\n\n"
+                            f"🖼️ <b>عدد الصور:</b> <code>{len(session_data)}</code>\n"
+                            f"📝 <b>الملاحظة:</b>\n{note_html}\n\n"
+                            f"{files_block}"
+                        ),
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=keyboard
                     ),
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=keyboard
+                    timeout=15.0
                 )
             except Exception as e:
                 logger.error(f"Failed to edit individual tracker to persistent log: {e}")
                 
         await self._batch.transfer_session_to_cleanup(user_id)
-                
-        await self._batch.clear_session(user_id)
-        await self._batch.clear_pending_compile(user_id)
-        await self._batch.set_finalizing(user_id, False)
         
         if self._pipeline:
-            await self._pipeline.activate_next_user()
+            await self._pipeline.finalize_session_and_advance(user_id, chat_id)

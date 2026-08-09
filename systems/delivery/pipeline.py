@@ -69,8 +69,11 @@ class DeliveryPipeline:
 
         if not job.image_bytes and job.image_file_id:
             try:
-                tg_file = await self._bot.get_file(job.image_file_id)
-                job.image_bytes = await tg_file.download_as_bytearray()
+                tg_file = await asyncio.wait_for(self._bot.get_file(job.image_file_id), timeout=30.0)
+                job.image_bytes = await asyncio.wait_for(tg_file.download_as_bytearray(), timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.error(f"JobID={job.job_id} | Telegram file download timed out after 30s.")
+                raise RuntimeError(f"Telegram download timeout for JobID={job.job_id}")
             except Exception as e:
                 logger.error(f"JobID={job.job_id} | Failed to download image: {e}")
                 raise RuntimeError(f"Failed to download image file: {e}")
@@ -219,3 +222,20 @@ class DeliveryPipeline:
         
         await self._batch.force_update_tracker(user_id)
         await self.flush_pending_to_queue(user_id, chat_id)
+
+    async def finalize_session_and_advance(self, user_id: int, chat_id: int) -> None:
+        """Phase 2: Bulletproof Handoff. Ensures next user is activated even if delivery fails."""
+        try:
+            await self._batch.clear_session(user_id)
+            await self._batch.clear_pending_compile(user_id)
+            await self._batch.set_finalizing(user_id, False)
+        except Exception as e:
+            logger.error(f"Failed to clear session state for user {user_id}: {e}")
+            
+        try:
+            next_user = await self._jobs.release_active_user()
+            if next_user:
+                next_user_id, next_chat_id = next_user
+                await self.activate_waiting_user(next_user_id, next_chat_id)
+        except Exception as e:
+            logger.error(f"Failed to activate next user during handoff: {e}")

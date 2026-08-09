@@ -146,9 +146,12 @@ class GroupedSessionStrategy:
                 
             if tracker_id:
                 try:
-                    await self._bot.edit_message_text(
-                        chat_id=job.chat_id, message_id=tracker_id,
-                        text=text, parse_mode=ParseMode.HTML
+                    await asyncio.wait_for(
+                        self._bot.edit_message_text(
+                            chat_id=job.chat_id, message_id=tracker_id,
+                            text=text, parse_mode=ParseMode.HTML
+                        ),
+                        timeout=15.0
                     )
                     return
                 except BadRequest as e:
@@ -163,22 +166,33 @@ class GroupedSessionStrategy:
                 except RetryAfter as e:
                     await asyncio.sleep(e.retry_after)
                     try:
-                        await self._bot.edit_message_text(
-                            chat_id=job.chat_id, message_id=tracker_id,
-                            text=text, parse_mode=ParseMode.HTML
+                        await asyncio.wait_for(
+                            self._bot.edit_message_text(
+                                chat_id=job.chat_id, message_id=tracker_id,
+                                text=text, parse_mode=ParseMode.HTML
+                            ),
+                            timeout=15.0
                         )
                     except Exception:
                         pass
+                    return
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout editing tracker for user {job.user_id}")
                     return
                 except Exception:
                     return
                 
             if not tracker_id:
                 try:
-                    msg = await self._bot.send_message(
-                        chat_id=job.chat_id, text=text, parse_mode=ParseMode.HTML
+                    msg = await asyncio.wait_for(
+                        self._bot.send_message(
+                            chat_id=job.chat_id, text=text, parse_mode=ParseMode.HTML
+                        ),
+                        timeout=15.0
                     )
                     await self._batch.set_tracker(job.user_id, msg.message_id)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Timeout sending new tracker for user {job.user_id}")
                 except Exception as e:
                     logger.error(f"Failed to create new tracker: {e}")
         finally:
@@ -188,6 +202,8 @@ class GroupedSessionStrategy:
         session_data = await self._batch.get_session_data(user_id)
         if not session_data:
             await self._batch.set_finalizing(user_id, False)
+            if self._pipeline:
+                await self._pipeline.finalize_session_and_advance(user_id, chat_id)
             return
 
         custom_name = await self._batch.get_custom_filename(user_id)
@@ -231,32 +247,48 @@ class GroupedSessionStrategy:
                     if fmt in ["txt", "both"]:
                         file_io = await asyncio.to_thread(handler.generate_txt, session_data, session_note)
                         try:
-                            await self._bot.send_document(
-                                chat_id=chat_id,
-                                document=InputFile(file_io, filename=f"{base_filename}.txt")
+                            await asyncio.wait_for(
+                                self._bot.send_document(
+                                    chat_id=chat_id,
+                                    document=InputFile(file_io, filename=f"{base_filename}.txt")
+                                ),
+                                timeout=60.0
                             )
                         except RetryAfter as e:
                             await asyncio.sleep(e.retry_after)
                             file_io.seek(0)
-                            await self._bot.send_document(
-                                chat_id=chat_id,
-                                document=InputFile(file_io, filename=f"{base_filename}.txt")
+                            await asyncio.wait_for(
+                                self._bot.send_document(
+                                    chat_id=chat_id,
+                                    document=InputFile(file_io, filename=f"{base_filename}.txt")
+                                ),
+                                timeout=60.0
                             )
+                        except asyncio.TimeoutError:
+                            raise RuntimeError("Telegram document send timed out.")
 
                     if fmt in ["docx", "both"]:
                         file_io = await asyncio.to_thread(handler.generate_docx, session_data, session_note)
                         try:
-                            await self._bot.send_document(
-                                chat_id=chat_id,
-                                document=InputFile(file_io, filename=f"{base_filename}.docx")
+                            await asyncio.wait_for(
+                                self._bot.send_document(
+                                    chat_id=chat_id,
+                                    document=InputFile(file_io, filename=f"{base_filename}.docx")
+                                ),
+                                timeout=60.0
                             )
                         except RetryAfter as e:
                             await asyncio.sleep(e.retry_after)
                             file_io.seek(0)
-                            await self._bot.send_document(
-                                chat_id=chat_id,
-                                document=InputFile(file_io, filename=f"{base_filename}.docx")
+                            await asyncio.wait_for(
+                                self._bot.send_document(
+                                    chat_id=chat_id,
+                                    document=InputFile(file_io, filename=f"{base_filename}.docx")
+                                ),
+                                timeout=60.0
                             )
+                        except asyncio.TimeoutError:
+                            raise RuntimeError("Telegram document send timed out.")
                 finally:
                     await self._batch.release_chat_send_lock(chat_id)
                     
@@ -291,35 +323,37 @@ class GroupedSessionStrategy:
                     keyboard = InlineKeyboardMarkup([
                         [InlineKeyboardButton("🗑️ حذف الصور الأصلية", callback_data="cleanup_photos")]
                     ])
-                    await self._bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=tracker_id,
-                        text=(
-                            f"✅ <b>اكتملت الجلسة بنجاح!</b>\n\n"
-                            f"📄 <b>اسم الملف:</b> <code>{escape_html(base_filename)}</code>\n"
-                            f"🖼️ <b>عدد الصور:</b> <code>{len(session_data)}</code>\n"
-                            f"📝 <b>الملاحظة:</b>\n{note_html}\n\n"
-                            f"{files_block}"
+                    await asyncio.wait_for(
+                        self._bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=tracker_id,
+                            text=(
+                                f"✅ <b>اكتملت الجلسة بنجاح!</b>\n\n"
+                                f"📄 <b>اسم الملف:</b> <code>{escape_html(base_filename)}</code>\n"
+                                f"🖼️ <b>عدد الصور:</b> <code>{len(session_data)}</code>\n"
+                                f"📝 <b>الملاحظة:</b>\n{note_html}\n\n"
+                                f"{files_block}"
+                            ),
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=keyboard
                         ),
-                        parse_mode=ParseMode.HTML,
-                        reply_markup=keyboard
+                        timeout=15.0
                     )
                 except Exception as e:
                     logger.error(f"Failed to edit tracker to persistent log: {e}")
                 
         except Exception as e:
             logger.error(f"Failed to process deferred compile: {e}")
-            await self._bot.send_message(
-                chat_id=chat_id,
-                text="❌ *فشل التجميع\\.*\nحدث خطأ أثناء دمج ملفات الجلسة\\. يرجى المحاولة لاحقاً\\.",
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
+            try:
+                await self._bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ *فشل التجميع\\.*\nحدث خطأ أثناء دمج ملفات الجلسة\\. يرجى المحاولة لاحقاً\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+            except Exception:
+                pass
             
         await self._batch.transfer_session_to_cleanup(user_id)
-            
-        await self._batch.clear_session(user_id)
-        await self._batch.clear_pending_compile(user_id)
-        await self._batch.set_finalizing(user_id, False)
         
         if self._pipeline:
-            await self._pipeline.activate_next_user()
+            await self._pipeline.finalize_session_and_advance(user_id, chat_id)
