@@ -22,7 +22,7 @@ class JobSubmissionResult(Enum):
 
 class JobManager:
     STATIC_AI_WORKERS: int = 4
-    STATIC_DELIVERY_WORKERS: int = 1
+    STATIC_DELIVERY_WORKERS: int = 2  # Increased to prevent UI blocking during DOCX generation
 
     def __init__(
         self, 
@@ -40,7 +40,6 @@ class JobManager:
         self._pipeline: Optional[PipelineProtocol] = None
         self._error_notifier: Optional[ErrorNotifierProtocol] = None
         
-        # Phase 1: Gatekeeper State
         self._active_user_id: Optional[int] = None
         self._waiting_queue: List[Tuple[int, float, int, int]] = []
 
@@ -152,7 +151,6 @@ class JobManager:
                     await self._transition_state(job, JobState.RENDERING)
                     job = await self._pipeline.render(job)
 
-                    # Pass to Delivery Queue
                     await self._delivery_queue.enqueue(job.job_id)
 
                 except asyncio.CancelledError:
@@ -177,7 +175,6 @@ class JobManager:
                         job_logger.log_error(current_job_id, e)
                         await self._transition_state(job, JobState.FAILED)
                         job.error = str(e)
-                        # Route to delivery to notify user of failure
                         await self._delivery_queue.enqueue(job.job_id)
                 
                 finally:
@@ -216,7 +213,6 @@ class JobManager:
                 
                 finally:
                     await self._delivery_queue.task_done()
-                    # Cleanup registry if not re-enqueued or waiting
                     if job.state in [JobState.FINISHED, JobState.FAILED]:
                         async with self._lock:
                             self._registry.pop(job.job_id, None)

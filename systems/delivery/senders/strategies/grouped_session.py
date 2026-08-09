@@ -67,8 +67,10 @@ class GroupedSessionStrategy:
         if processing_count < 0:
             processing_count = 0
         
-        await self._update_session_tracker(job, total_pages, queue_size, processing_count, total_received, is_pending)
+        # Decoupled UI Update: Do not block compilation if Telegram is slow
+        asyncio.create_task(self._update_session_tracker(job, total_pages, queue_size, processing_count, total_received, is_pending))
         
+        # Instant Completion Check
         if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
                 try:
@@ -252,7 +254,6 @@ class GroupedSessionStrategy:
                 await self._batch.acquire_chat_send_lock(chat_id)
                 try:
                     if fmt in ["txt", "both"]:
-                        # Strict CPU Offloading
                         file_io = await asyncio.to_thread(handler.generate_txt, session_data, session_note)
                         try:
                             await asyncio.wait_for(
@@ -276,7 +277,6 @@ class GroupedSessionStrategy:
                             raise RuntimeError("Telegram document send timed out.")
 
                     if fmt in ["docx", "both"]:
-                        # Strict CPU Offloading
                         file_io = await asyncio.to_thread(handler.generate_docx, session_data, session_note)
                         try:
                             await asyncio.wait_for(

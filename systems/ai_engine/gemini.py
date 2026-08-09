@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class GeminiProvider(BaseAIProvider):
     """
     Concrete AI provider for Google Gemini API.
-    Implements multi-key, multi-model fallback and a Circuit Breaker.
+    Implements multi-key, multi-model fallback, Circuit Breaker, and Connection Pooling.
     """
 
     FALLBACK_MODELS: List[str] = [
@@ -52,7 +52,14 @@ class GeminiProvider(BaseAIProvider):
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(timeout=self._timeout)
+            # High-performance connection pooling
+            connector = aiohttp.TCPConnector(
+                limit=100, 
+                limit_per_host=0, 
+                force_close=False,
+                enable_cleanup_closed=True
+            )
+            self._session = aiohttp.ClientSession(timeout=self._timeout, connector=connector)
         return self._session
 
     async def close(self) -> None:
@@ -91,7 +98,10 @@ class GeminiProvider(BaseAIProvider):
             await self._record_failure()
             raise AIProcessingError(f"JobID={job_id} | No API keys provided.")
 
-        b64_image = base64.b64encode(image_bytes).decode("utf-8")
+        # Offload Base64 encoding to a thread to prevent Event Loop blocking
+        b64_bytes = await asyncio.to_thread(base64.b64encode, image_bytes)
+        b64_image = b64_bytes.decode("utf-8")
+        
         payload = self._build_payload(b64_image, prompt_text)
 
         last_exception: Optional[Exception] = None
