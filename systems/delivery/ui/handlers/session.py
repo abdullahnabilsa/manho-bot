@@ -92,7 +92,20 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     pending_files = await container.batch.get_pending_files(user_id)
     if not pending_files:
-        await update.message.reply_text("⚠️ *الجلسة فارغة\\.*\nلم تقم بإرسال أي صور صالحة\\. أرسل صوراً أولاً ثم أنهِ الجلسة\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        # FIX: Clear the session immediately if it's empty to unlock the bot for the user
+        context.user_data['awaiting_session_filename'] = False
+        await container.batch.clear_session(user_id)
+        
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+            
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="🚪 *تم إغلاق الجلسة لأنها فارغة\\.*\nيمكنك الآن استخدام الأوامر العادية مثل الإعدادات والمساعدة\\.",
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
         return
 
     tracker_id = await container.batch.get_tracker(user_id)
