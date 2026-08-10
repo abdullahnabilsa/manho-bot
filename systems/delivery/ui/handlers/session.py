@@ -6,6 +6,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode, ChatAction
+from telegram.error import RetryAfter, BadRequest
 
 from utils.markdown_escaper import escape_markdown_v2, sanitize_filename
 from systems.delivery.pipeline import FlushResult
@@ -19,6 +20,8 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['awaiting_session_filename'] = False
     await container.batch.set_finalizing(user_id, False)
     
+    await container.batch.add_transient_message(user_id, update.message.message_id)
+    
     persona_name = await container.settings.get_persona(user_id)
     if not persona_name:
         persona_name = "Default Translator"
@@ -28,10 +31,6 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         session_mode = "grouped"
         
     await container.batch.start_session(user_id, persona_name, session_mode)
-    
-    # Track the user's start command/button message
-    if update.message:
-        await container.batch.add_transitional_message_ids(user_id, [update.message.message_id])
     
     mode_text = "تجميع جماعي (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
     
@@ -51,10 +50,8 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         
     text += "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
     
-    sent_msg = await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
-    
-    # Track the bot's start confirmation message
-    await container.batch.add_transitional_message_ids(user_id, [sent_msg.message_id])
+    reply_msg = await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
+    await container.batch.add_transient_message(user_id, reply_msg.message_id)
 
 async def set_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -93,9 +90,7 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
-    # Track the user's end command/button message
-    if update.message:
-        await container.batch.add_transitional_message_ids(user_id, [update.message.message_id])
+    await container.batch.add_transient_message(user_id, update.message.message_id)
     
     if not await container.batch.is_session_active(user_id):
         await update.message.reply_text("⚠️ *لا توجد جلسة نشطة حالياً\\.*\nاضغط *🟢 بدء الجلسة* أولاً قبل إرسال الصور\\.", parse_mode=ParseMode.MARKDOWN_V2)
@@ -414,30 +409,29 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
 async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Phase 3: Cleanup Engine - Deletes original photos and transitional messages."""
+    """Phase 3: Cleanup Engine - Deletes original photos and transient messages in bulk."""
     query = update.callback_query
     await query.answer("جاري تنظيف الشات...", show_alert=False)
     container = context.bot_data["container"]
     user_id = query.from_user.id
     chat_id = query.message.chat_id
     
-    photo_ids = await container.batch.get_cleanup_photo_ids(user_id)
-    transitional_ids = await container.batch.get_transitional_message_ids(user_id)
-    
-    # Combine all IDs to delete (original photos + user commands + bot transitional messages)
-    all_ids_to_delete = list(set(photo_ids + transitional_ids))
-    
-    if not all_ids_to_delete:
+    cleanup_ids = await container.batch.get_cleanup_photo_ids(user_id)
+    if not cleanup_ids:
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
         return
         
-    for i in range(0, len(all_ids_to_delete), 100):
-        chunk = all_ids_to_delete[i:i+100]
+    for i in range(0, len(cleanup_ids), 100):
+        chunk = cleanup_ids[i:i+100]
         try:
             await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
+        except BadRequest as e:
+            if "message to delete not found" in str(e).lower():
+                continue
+            logger.warning(f"BadRequest during cleanup: {e}")
         except Exception as e:
             logger.warning(f"Failed to delete some messages: {e}")
             

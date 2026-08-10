@@ -76,7 +76,6 @@ class IndividualSessionStrategy:
         
         session_note = await self._batch.get_session_note(job.user_id)
         
-        # Fetch handler for file generation
         persona_name = await self._batch.get_session_persona(job.user_id)
         file_handler = self._personas.get_handler(persona_name)
         
@@ -245,6 +244,16 @@ class IndividualSessionStrategy:
         session_data = await self._batch.get_session_data(user_id)
         session_note = await self._batch.get_session_note(user_id)
         
+        try:
+            success_msg = await self._bot.send_message(
+                chat_id=chat_id,
+                text="✅ *اكتملت الجلسة\\!*\nتم تجهيز الملفات وإرسالها بنجاح\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            await self._batch.add_transient_message(user_id, success_msg.message_id)
+        except Exception:
+            pass
+            
         tracker_id = await self._batch.get_tracker(user_id)
         if tracker_id:
             try:
@@ -261,7 +270,7 @@ class IndividualSessionStrategy:
                 files_block = f"<blockquote expandable>📄 <b>الصور المترجمة:</b>\n{files_text}</blockquote>"
                 
                 keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🗑️ حذف الصور الأصلية", callback_data="cleanup_photos")]
+                    [InlineKeyboardButton("🧹 تنظيف الشات", callback_data="cleanup_photos")]
                 ])
                 await asyncio.wait_for(
                     self._bot.edit_message_text(

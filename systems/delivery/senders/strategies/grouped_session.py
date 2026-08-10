@@ -72,12 +72,12 @@ class GroupedSessionStrategy:
         if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
                 try:
-                    compiling_msg = await self._bot.send_message(
+                    msg = await self._bot.send_message(
                         chat_id=job.chat_id,
                         text="📦 <b>اكتملت معالجة جميع الصور!</b>\nجاري تجميع الملفات النهائية وإرسالها...",
                         parse_mode=ParseMode.HTML
                     )
-                    await self._batch.add_transitional_message_ids(job.user_id, [compiling_msg.message_id])
+                    await self._batch.add_transient_message(job.user_id, msg.message_id)
                 except Exception:
                     pass
                 await self.compile_and_send(job.user_id, job.chat_id)
@@ -285,15 +285,12 @@ class GroupedSessionStrategy:
                 finally:
                     await self._batch.release_chat_send_lock(chat_id)
                     
-            try:
-                success_msg = await self._bot.send_message(
-                    chat_id=chat_id,
-                    text="✅ *اكتملت الجلسة\\!*\nتم تجهيز الملفات وإرسالها بنجاح\\.",
-                    parse_mode=ParseMode.MARKDOWN_V2
-                )
-                await self._batch.add_transitional_message_ids(user_id, [success_msg.message_id])
-            except Exception:
-                pass
+            success_msg = await self._bot.send_message(
+                chat_id=chat_id,
+                text="✅ *اكتملت الجلسة\\!*\nتم تجهيز الملفات وإرسالها بنجاح\\.",
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+            await self._batch.add_transient_message(user_id, success_msg.message_id)
             
             prompt_msg_id = await self._batch.get_prompt_message_id(user_id)
             if prompt_msg_id:
@@ -318,7 +315,7 @@ class GroupedSessionStrategy:
                     files_block = f"<blockquote expandable>📄 <b>الصور المترجمة:</b>\n{files_text}</blockquote>"
                     
                     keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("🗑️ حذف الصور الأصلية", callback_data="cleanup_photos")]
+                        [InlineKeyboardButton("🧹 تنظيف الشات", callback_data="cleanup_photos")]
                     ])
                     await asyncio.wait_for(
                         self._bot.edit_message_text(

@@ -29,6 +29,8 @@ class BatchManager:
         self._session_notes: Dict[int, str] = {}
         self._session_photo_ids: Dict[int, List[int]] = {}
         
+        self._transient_bot_message_ids: Dict[int, List[int]] = {}
+        
         self._cleanup_photo_ids: Dict[int, Tuple[List[int], float]] = {}
         self._compile_locks: Set[int] = set()
         
@@ -40,9 +42,6 @@ class BatchManager:
         self._locks_creation_lock = asyncio.Lock()
         
         self._waiting_message_ids: Dict[int, int] = {}
-        
-        # NEW: Track transitional messages to clean them up later
-        self._session_transitional_message_ids: Dict[int, List[int]] = {}
 
     def _cleanup_stale_sessions(self) -> None:
         current_time = time.time()
@@ -68,9 +67,9 @@ class BatchManager:
             self._pending_file_ids.pop(user_id, None)
             self._session_notes.pop(user_id, None)
             self._session_photo_ids.pop(user_id, None)
+            self._transient_bot_message_ids.pop(user_id, None)
             self._compile_locks.discard(user_id)
             self._waiting_message_ids.pop(user_id, None)
-            self._session_transitional_message_ids.pop(user_id, None)
             
         stale_cleanup = [
             user_id for user_id, (_, ts) in self._cleanup_photo_ids.items()
@@ -94,7 +93,7 @@ class BatchManager:
             self._pending_file_ids[user_id] = []
             self._session_notes[user_id] = ""
             self._session_photo_ids[user_id] = []
-            self._session_transitional_message_ids[user_id] = []
+            self._transient_bot_message_ids[user_id] = []
         
         self._cleanup_photo_ids.pop(user_id, None)
         self._finalizing_users.discard(user_id)
@@ -140,10 +139,10 @@ class BatchManager:
         self._pending_file_ids.pop(user_id, None)
         self._session_notes.pop(user_id, None)
         self._session_photo_ids.pop(user_id, None)
+        self._transient_bot_message_ids.pop(user_id, None)
         self._compile_locks.discard(user_id)
         self._received_counts.pop(user_id, None)
         self._waiting_message_ids.pop(user_id, None)
-        self._session_transitional_message_ids.pop(user_id, None)
 
     async def set_pending_compile(self, user_id: int) -> None:
         self._pending_compiles.add(user_id)
@@ -151,7 +150,7 @@ class BatchManager:
     async def is_pending_compile(self, user_id: int) -> bool:
         return user_id in self._pending_compiles
 
-    async def clear_pending_compile(self, user_id: int) -> None:
+    async def clear_pending_compile(self, user_id: int) -> bool:
         self._pending_compiles.discard(user_id)
 
     async def try_acquire_compile_lock(self, user_id: int) -> bool:
@@ -295,22 +294,28 @@ class BatchManager:
     async def get_session_photo_ids(self, user_id: int) -> List[int]:
         return list(self._session_photo_ids.get(user_id, []))
 
-    # --- TRANSITIONAL MESSAGES ENGINE ---
+    async def add_transient_message(self, user_id: int, message_id: int) -> None:
+        if user_id not in self._transient_bot_message_ids:
+            self._transient_bot_message_ids[user_id] = []
+        self._transient_bot_message_ids[user_id].append(message_id)
 
-    async def add_transitional_message_ids(self, user_id: int, message_ids: List[int]) -> None:
-        if user_id not in self._session_transitional_message_ids:
-            self._session_transitional_message_ids[user_id] = []
-        self._session_transitional_message_ids[user_id].extend(message_ids)
-
-    async def get_transitional_message_ids(self, user_id: int) -> List[int]:
-        return list(self._session_transitional_message_ids.get(user_id, []))
+    async def get_transient_messages(self, user_id: int) -> List[int]:
+        return list(self._transient_bot_message_ids.get(user_id, []))
 
     # --- 3-TIER SAFE CLEANUP ENGINE ---
 
     async def transfer_session_to_cleanup(self, user_id: int) -> None:
         photo_ids = self._session_photo_ids.get(user_id, [])
-        if photo_ids:
-            self._cleanup_photo_ids[user_id] = (photo_ids, time.time())
+        transient_ids = self._transient_bot_message_ids.get(user_id, [])
+        
+        combined_ids = list(set(photo_ids + transient_ids))
+        
+        tracker_id = self._session_trackers.get(user_id)
+        if tracker_id and tracker_id in combined_ids:
+            combined_ids.remove(tracker_id)
+            
+        if combined_ids:
+            self._cleanup_photo_ids[user_id] = (combined_ids, time.time())
 
     async def get_cleanup_photo_ids(self, user_id: int) -> List[int]:
         data = self._cleanup_photo_ids.get(user_id)
