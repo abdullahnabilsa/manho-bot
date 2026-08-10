@@ -20,8 +20,6 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['awaiting_session_filename'] = False
     await container.batch.set_finalizing(user_id, False)
     
-    await container.batch.add_transient_message(user_id, update.message.message_id)
-    
     persona_name = await container.settings.get_persona(user_id)
     if not persona_name:
         persona_name = "Default Translator"
@@ -31,6 +29,9 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         session_mode = "grouped"
         
     await container.batch.start_session(user_id, persona_name, session_mode)
+    
+    # FIX: Must be called AFTER start_session to prevent the list from being wiped by initialization
+    await container.batch.add_transient_message(user_id, update.message.message_id)
     
     mode_text = "تجميع جماعي (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
     
