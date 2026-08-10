@@ -29,6 +29,10 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         
     await container.batch.start_session(user_id, persona_name, session_mode)
     
+    # Track the user's start command/button message
+    if update.message:
+        await container.batch.add_transitional_message_ids(user_id, [update.message.message_id])
+    
     mode_text = "تجميع جماعي (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
     
     text = (
@@ -47,7 +51,10 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         
     text += "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
     
-    await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
+    sent_msg = await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
+    
+    # Track the bot's start confirmation message
+    await container.batch.add_transitional_message_ids(user_id, [sent_msg.message_id])
 
 async def set_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -86,13 +93,16 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
+    # Track the user's end command/button message
+    if update.message:
+        await container.batch.add_transitional_message_ids(user_id, [update.message.message_id])
+    
     if not await container.batch.is_session_active(user_id):
         await update.message.reply_text("⚠️ *لا توجد جلسة نشطة حالياً\\.*\nاضغط *🟢 بدء الجلسة* أولاً قبل إرسال الصور\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
     pending_files = await container.batch.get_pending_files(user_id)
     if not pending_files:
-        # FIX: Clear the session immediately if it's empty to unlock the bot for the user
         context.user_data['awaiting_session_filename'] = False
         await container.batch.clear_session(user_id)
         
@@ -404,7 +414,7 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
 async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Phase 3: Cleanup Engine - Deletes original photos in bulk (3-Tier Safe Cleanup)."""
+    """Phase 3: Cleanup Engine - Deletes original photos and transitional messages."""
     query = update.callback_query
     await query.answer("جاري تنظيف الشات...", show_alert=False)
     container = context.bot_data["container"]
@@ -412,15 +422,20 @@ async def handle_cleanup_photos_callback(update: Update, context: ContextTypes.D
     chat_id = query.message.chat_id
     
     photo_ids = await container.batch.get_cleanup_photo_ids(user_id)
-    if not photo_ids:
+    transitional_ids = await container.batch.get_transitional_message_ids(user_id)
+    
+    # Combine all IDs to delete (original photos + user commands + bot transitional messages)
+    all_ids_to_delete = list(set(photo_ids + transitional_ids))
+    
+    if not all_ids_to_delete:
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
         return
         
-    for i in range(0, len(photo_ids), 100):
-        chunk = photo_ids[i:i+100]
+    for i in range(0, len(all_ids_to_delete), 100):
+        chunk = all_ids_to_delete[i:i+100]
         try:
             await context.bot.delete_messages(chat_id=chat_id, message_ids=chunk)
         except Exception as e:

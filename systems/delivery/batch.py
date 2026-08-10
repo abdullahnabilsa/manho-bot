@@ -40,6 +40,9 @@ class BatchManager:
         self._locks_creation_lock = asyncio.Lock()
         
         self._waiting_message_ids: Dict[int, int] = {}
+        
+        # NEW: Track transitional messages to clean them up later
+        self._session_transitional_message_ids: Dict[int, List[int]] = {}
 
     def _cleanup_stale_sessions(self) -> None:
         current_time = time.time()
@@ -67,6 +70,7 @@ class BatchManager:
             self._session_photo_ids.pop(user_id, None)
             self._compile_locks.discard(user_id)
             self._waiting_message_ids.pop(user_id, None)
+            self._session_transitional_message_ids.pop(user_id, None)
             
         stale_cleanup = [
             user_id for user_id, (_, ts) in self._cleanup_photo_ids.items()
@@ -90,6 +94,7 @@ class BatchManager:
             self._pending_file_ids[user_id] = []
             self._session_notes[user_id] = ""
             self._session_photo_ids[user_id] = []
+            self._session_transitional_message_ids[user_id] = []
         
         self._cleanup_photo_ids.pop(user_id, None)
         self._finalizing_users.discard(user_id)
@@ -138,6 +143,7 @@ class BatchManager:
         self._compile_locks.discard(user_id)
         self._received_counts.pop(user_id, None)
         self._waiting_message_ids.pop(user_id, None)
+        self._session_transitional_message_ids.pop(user_id, None)
 
     async def set_pending_compile(self, user_id: int) -> None:
         self._pending_compiles.add(user_id)
@@ -288,6 +294,16 @@ class BatchManager:
 
     async def get_session_photo_ids(self, user_id: int) -> List[int]:
         return list(self._session_photo_ids.get(user_id, []))
+
+    # --- TRANSITIONAL MESSAGES ENGINE ---
+
+    async def add_transitional_message_ids(self, user_id: int, message_ids: List[int]) -> None:
+        if user_id not in self._session_transitional_message_ids:
+            self._session_transitional_message_ids[user_id] = []
+        self._session_transitional_message_ids[user_id].extend(message_ids)
+
+    async def get_transitional_message_ids(self, user_id: int) -> List[int]:
+        return list(self._session_transitional_message_ids.get(user_id, []))
 
     # --- 3-TIER SAFE CLEANUP ENGINE ---
 

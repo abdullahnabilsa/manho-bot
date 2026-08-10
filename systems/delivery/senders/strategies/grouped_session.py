@@ -72,11 +72,12 @@ class GroupedSessionStrategy:
         if is_pending and queue_size == 0 and processing_count == 0:
             if await self._batch.try_acquire_compile_lock(job.user_id):
                 try:
-                    await self._bot.send_message(
+                    compiling_msg = await self._bot.send_message(
                         chat_id=job.chat_id,
                         text="📦 <b>اكتملت معالجة جميع الصور!</b>\nجاري تجميع الملفات النهائية وإرسالها...",
                         parse_mode=ParseMode.HTML
                     )
+                    await self._batch.add_transitional_message_ids(job.user_id, [compiling_msg.message_id])
                 except Exception:
                     pass
                 await self.compile_and_send(job.user_id, job.chat_id)
@@ -232,7 +233,6 @@ class GroupedSessionStrategy:
                 for pd in session_data:
                     temp_job = PageJob(user_id=user_id, chat_id=chat_id, page_data=pd, file_name=pd.file_name)
                     msgs = await handler.paginate(temp_job, mode=mode)
-                    # Use parallel batch sending instead of sequential loop
                     await self._renderer.render_messages(self._bot, temp_job, msgs)
             else:
                 await self._batch.acquire_chat_send_lock(chat_id)
@@ -285,11 +285,15 @@ class GroupedSessionStrategy:
                 finally:
                     await self._batch.release_chat_send_lock(chat_id)
                     
-            await self._bot.send_message(
-                chat_id=chat_id,
-                text="✅ *اكتملت الجلسة\\!*\nتم تجهيز الملفات وإرسالها بنجاح\\.",
-                parse_mode=ParseMode.MARKDOWN_V2
-            )
+            try:
+                success_msg = await self._bot.send_message(
+                    chat_id=chat_id,
+                    text="✅ *اكتملت الجلسة\\!*\nتم تجهيز الملفات وإرسالها بنجاح\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                await self._batch.add_transitional_message_ids(user_id, [success_msg.message_id])
+            except Exception:
+                pass
             
             prompt_msg_id = await self._batch.get_prompt_message_id(user_id)
             if prompt_msg_id:
