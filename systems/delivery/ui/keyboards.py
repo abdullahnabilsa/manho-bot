@@ -3,11 +3,6 @@ from __future__ import annotations
 from typing import List, Tuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 
-
-# ============================================================
-# Persistent & Main Menu Keyboards
-# ============================================================
-
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚙️ الإعدادات", callback_data="open_settings")],
@@ -22,11 +17,6 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True
     )
-
-
-# ============================================================
-# Settings Keyboards
-# ============================================================
 
 def get_settings_dashboard_keyboard(user_settings: dict) -> InlineKeyboardMarkup:
     persona = user_settings.get("persona", "Default Translator")
@@ -97,33 +87,15 @@ def get_session_mode_keyboard(current_mode: str) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
-
-# ============================================================
-# Dynamic Pagination Engine
-# ============================================================
-
 def build_paginated_keyboard(
     items: List[Tuple[str, str]],
     action: str,
     page: int = 0,
     items_per_page: int = 8
 ) -> InlineKeyboardMarkup:
-    """
-    Build a paginated inline keyboard.
-    
-    Args:
-        items: List of (display_text, target_id) tuples.
-        action: Action prefix for callback_data (e.g., 'access_removeadmin').
-        page: Current page index (0-based).
-        items_per_page: Number of items per page.
-    
-    Returns:
-        InlineKeyboardMarkup with paginated buttons and navigation.
-    """
     total_items = len(items)
     total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
     
-    # Clamp page to valid range
     if page < 0:
         page = 0
     elif page >= total_pages:
@@ -135,7 +107,6 @@ def build_paginated_keyboard(
     
     keyboard = []
     
-    # Item buttons
     for display_text, target_id in page_items:
         keyboard.append([
             InlineKeyboardButton(
@@ -144,14 +115,12 @@ def build_paginated_keyboard(
             )
         ])
     
-    # Navigation row
     nav_buttons = []
     if page > 0:
         nav_buttons.append(
             InlineKeyboardButton("⬅️ السابق", callback_data=f"adm_nav_{action}_{page - 1}")
         )
     
-    # Page indicator (non-clickable)
     if total_pages > 1:
         nav_buttons.append(
             InlineKeyboardButton(f"📄 {page + 1}/{total_pages}", callback_data="adm_nopage")
@@ -165,23 +134,11 @@ def build_paginated_keyboard(
     if nav_buttons:
         keyboard.append(nav_buttons)
     
-    # Cancel button
     keyboard.append([InlineKeyboardButton("❌ إلغاء", callback_data="adm_cancel")])
     
     return InlineKeyboardMarkup(keyboard)
 
-
 def build_confirmation_keyboard(action: str, target_id: str) -> InlineKeyboardMarkup:
-    """
-    Build a double-confirmation keyboard for destructive/sensitive actions.
-    
-    Args:
-        action: Action identifier (e.g., 'access_removeadmin').
-        target_id: Target entity ID.
-    
-    Returns:
-        InlineKeyboardMarkup with confirm/cancel buttons.
-    """
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ تأكيد", callback_data=f"adm_conf_{action}_{target_id}"),

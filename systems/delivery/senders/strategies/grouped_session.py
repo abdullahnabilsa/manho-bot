@@ -74,8 +74,8 @@ class GroupedSessionStrategy:
                 try:
                     msg = await self._bot.send_message(
                         chat_id=job.chat_id,
-                        text="📦 <b>اكتملت معالجة جميع الصور!</b>\nجاري تجميع الملفات النهائية وإرسالها...",
-                        parse_mode=ParseMode.HTML
+                        text="📦 *اكتملت معالجة جميع الصور\\!*\nجاري تجميع الملفات النهائية وإرسالها...",
+                        parse_mode=ParseMode.MARKDOWN_V2
                     )
                     await self._batch.add_transient_message(job.user_id, msg.message_id)
                 except Exception:

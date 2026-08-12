@@ -190,11 +190,9 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             parse_mode=ParseMode.MARKDOWN_V2
         )
     
-    # Phase 1: Intake & Caching Engine (Zero Network Usage for AI)
     await batch_manager.add_pending_file(user.id, image_file_id, file_name, update.message.message_id)
     await batch_manager.add_session_photo_id(user.id, update.message.message_id)
     
-    # 3-Second Floating Rule Evaluation
     current_msg_time = update.message.date if update.message.date else datetime.now(timezone.utc)
     last_msg_time = context.user_data.get('last_image_time')
     
@@ -204,16 +202,13 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if is_new_batch:
         context.user_data['force_new_tracker'] = True
         
-    # Smart Flood Shield
     current_time = _time.time()
     last_update_time = context.user_data.get('last_intake_update', 0.0)
     
     if current_time - last_update_time < 0.5:
-        # Schedule deferred task to catch up with the rest of the burst
         _schedule_deferred_tracker_update(update, context)
         return
         
-    # Passed shield, render immediately and cancel any pending deferred task
     _cancel_deferred_tracker_update(context)
     await _render_intake_tracker(update, context)
 

@@ -15,7 +15,7 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     is_adm = await container.access.is_admin(update.effective_user.id)
     if not is_adm:
         if update.message:
-            await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            await update.message.reply_text("🚫 *هذا الأمر مخصص للمشرفين فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         elif update.callback_query:
             await update.callback_query.answer("🚫 للمشرفين فقط", show_alert=True)
     return is_adm
@@ -74,7 +74,6 @@ async def remove_public_key_command(update: Update, context: ContextTypes.DEFAUL
     
     args = context.args
     if not args:
-        # Show interactive list
         items = [(f"🔑 {k[:8]}...{k[-4:]}", k[:12]) for k in keys]
         keyboard = build_paginated_keyboard(items, "apikey_removekey", page=0)
         await update.message.reply_text(
@@ -84,7 +83,6 @@ async def remove_public_key_command(update: Update, context: ContextTypes.DEFAUL
         )
         return
     
-    # Direct removal by prefix
     prefix = args[0]
     found_key = None
     for k in keys:
@@ -104,32 +102,22 @@ async def remove_public_key_command(update: Update, context: ContextTypes.DEFAUL
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
-
-# ============================================================
-# Interactive API Key Callback Handler
-# ============================================================
-
 async def handle_apikey_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Router for adm_(sel|conf|nav)_apikey_ callbacks."""
     query = update.callback_query
     await query.answer()
     container = context.bot_data["container"]
     data = query.data or ""
     
-    # Verify admin
     if not await container.access.is_admin(query.from_user.id):
         await query.answer("🚫 للمشرفين فقط", show_alert=True)
         return
     
-    # --- SELECTION: Show confirmation ---
     if data.startswith("adm_sel_apikey_"):
         parts = data.replace("adm_sel_apikey_", "").rsplit("_", 1)
-        if len(parts) != 2:
-            return
+        if len(parts) != 2: return
         action, target_prefix = parts
         
         if action == "removekey":
-            # Find the actual key
             keys = await container.api_keys.get_public_keys()
             found_key = next((k for k in keys if k.startswith(target_prefix)), None)
             if not found_key:
@@ -147,11 +135,9 @@ async def handle_apikey_callback(update: Update, context: ContextTypes.DEFAULT_T
                 reply_markup=keyboard
             )
     
-    # --- CONFIRMATION: Execute deletion ---
     elif data.startswith("adm_conf_apikey_"):
         parts = data.replace("adm_conf_apikey_", "").rsplit("_", 1)
-        if len(parts) != 2:
-            return
+        if len(parts) != 2: return
         action, target_prefix = parts
         
         if action == "removekey":
@@ -171,14 +157,11 @@ async def handle_apikey_callback(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode=ParseMode.MARKDOWN_V2
             )
     
-    # --- NAVIGATION: Show next/prev page ---
     elif data.startswith("adm_nav_apikey_"):
         parts = data.replace("adm_nav_apikey_", "").rsplit("_", 1)
-        if len(parts) != 2:
-            return
+        if len(parts) != 2: return
         action, page_str = parts
-        if not page_str.isdigit():
-            return
+        if not page_str.isdigit(): return
         page = int(page_str)
         
         if action == "removekey":
@@ -202,13 +185,7 @@ async def handle_apikey_callback(update: Update, context: ContextTypes.DEFAULT_T
             except Exception:
                 pass
 
-
-# ============================================================
-# Admin Cancel Handler
-# ============================================================
-
 async def handle_admin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle adm_cancel callback — dismisses interactive admin panels."""
     query = update.callback_query
     await query.answer()
     try:
@@ -218,11 +195,6 @@ async def handle_admin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     except Exception:
         pass
-
-
-# ============================================================
-# Glossary Commands
-# ============================================================
 
 async def upload_dict_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await is_admin(update, context): return

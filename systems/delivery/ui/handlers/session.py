@@ -30,7 +30,6 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         
     await container.batch.start_session(user_id, persona_name, session_mode)
     
-    # FIX: Must be called AFTER start_session to prevent the list from being wiped by initialization
     await container.batch.add_transient_message(user_id, update.message.message_id)
     
     mode_text = "تجميع جماعي (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
@@ -41,15 +40,10 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         "في هذا الوضع، تم تفعيل *الحماية القصوى* لمنع التشتت:\n"
         "• سيتم قبول *صور المانغا فقط*\\.\n"
         "• يمكنك إرسال *أي عدد من الصور* دفعة واحدة أو تباعاً\\.\n"
-        "• سيتم *حذف* أي رسالة نصية، ملصق، أو أمر فوراً\\.\n\n"
+        "• سيتم *حذف* أي رسالة نصية، ملصق، أو أمر غير مصرح به فوراً\\.\n\n"
+        "⚠️ *للخروج من هذا الوضع وتجميع الملفات:* اضغط زر *🔴 إنهاء الجلسة*\\.\n"
+        "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
     )
-    
-    if session_mode == "grouped":
-        text += "⚠️ *للخروج من هذا الوضع وتجميع الملفات:* اضغط زر *🔴 إنهاء الجلسة*\\.\n"
-    else:
-        text += "⚠️ *في هذا الوضع سيتم إرسال ملف الترجمة فور انتهاء معالجة كل صورة*\\.\n"
-        
-    text += "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
     
     reply_msg = await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
     await container.batch.add_transient_message(user_id, reply_msg.message_id)
@@ -109,7 +103,7 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             
         await context.bot.send_message(
             chat_id=chat_id,
-            text="🚪 *تم إغلاق الجلسة لأنها فارغة\\.*\nيمكنك الآن استخدام الأوامر العادية مثل الإعدادات والمساعدة\\.",
+            text="⚠️ *لا توجد صور للمعالجة\\.*\nتم إنهاء الجلسة الفارغة\\. يمكنك الآن استخدام الأوامر العادية\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         return
@@ -131,12 +125,12 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
         if result == FlushResult.WAITING:
             text = (
-                "⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
-                "تم وضعك في غرفة الانتظار.\n\n"
-                "<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
+                "⏳ *النظام يعمل بكامل طاقته حالياً\\.*\n"
+                "تم وضعك في قائمة الانتظار\\.\n\n"
+                "_لا تحتاج لفعل شيء، سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
             )
             try:
-                msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
                 await container.batch.set_waiting_message_id(user_id, msg.message_id)
             except Exception:
                 pass
@@ -147,16 +141,16 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         elif result == FlushResult.ALLOWED:
             text = (
-                "⏳ <b>جاري ترجمة الصور وإرسالها فردياً...</b>\n\n"
-                "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-                f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
-                "• تمت ترجمتها: <code>0</code>\n"
-                "• قيد المعالجة الآن: <code>0</code>\n"
-                "• في الطابور: <code>0</code>\n\n"
-                "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم إرسال كل الملفات.</i>"
+                "⏳ *جاري ترجمة الصور وإرسالها فردياً...*\n\n"
+                "📊 *إحصائيات الجلسة:*\n"
+                f"• إجمالي الصور: `{len(pending_files)}`\n"
+                "• تمت ترجمتها: `0`\n"
+                "• قيد المعالجة: `0`\n"
+                "• في الطابور: `0`\n\n"
+                "_يعمل النظام بعدد ثابت من العمال المتوازيين، يرجى الانتظار حتى يتم إرسال كل الملفات\\._"
             )
             try:
-                msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
                 await container.batch.set_tracker(user_id, msg.message_id)
                 await container.batch.force_update_tracker(user_id)
             except Exception as e:
@@ -222,12 +216,12 @@ async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if result == FlushResult.WAITING:
         text = (
-            "⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
-            "تم وضعك في غرفة الانتظار.\n\n"
-            "<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
+            "⏳ *النظام يعمل بكامل طاقته حالياً\\.*\n"
+            "تم وضعك في قائمة الانتظار\\.\n\n"
+            "_لا تحتاج لفعل شيء، سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
         )
         try:
-            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
             await container.batch.set_waiting_message_id(user_id, msg.message_id)
         except Exception:
             pass
@@ -238,16 +232,16 @@ async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     elif result == FlushResult.ALLOWED:
         text = (
-            "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
-            "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-            f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
-            "• تمت ترجمتها: <code>0</code>\n"
-            "• قيد المعالجة الآن: <code>0</code>\n"
-            "• في الطابور: <code>0</code>\n\n"
-            "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
+            "⏳ *جاري ترجمة الصور وتجميع الملف...*\n\n"
+            "📊 *إحصائيات الجلسة:*\n"
+            f"• إجمالي الصور: `{len(pending_files)}`\n"
+            "• تمت ترجمتها: `0`\n"
+            "• قيد المعالجة: `0`\n"
+            "• في الطابور: `0`\n\n"
+            "_يعمل النظام بعدد ثابت من العمال المتوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات\\._"
         )
         try:
-            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
             await container.batch.set_tracker(user_id, msg.message_id)
             await container.batch.force_update_tracker(user_id)
         except Exception as e:
@@ -376,12 +370,12 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
     
     if result == FlushResult.WAITING:
         text = (
-            "⏳ <b>النظام مشغول بجلسة مستخدم آخر</b>\n\n"
-            "تم وضعك في غرفة الانتظار.\n\n"
-            "<i>لا تحتاج لفعل شيء، سيتم ترجمة صورك وإرسال الملف تلقائياً عند انتهاء دورك.</i>"
+            "⏳ *النظام يعمل بكامل طاقته حالياً\\.*\n"
+            "تم وضعك في قائمة الانتظار\\.\n\n"
+            "_لا تحتاج لفعل شيء، سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
         )
         try:
-            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
             await container.batch.set_waiting_message_id(user_id, msg.message_id)
         except Exception:
             pass
@@ -392,16 +386,16 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
         return
     elif result == FlushResult.ALLOWED:
         text = (
-            "⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
-            "📊 <b>إحصائيات الجلسة الحالية:</b>\n"
-            f"• إجمالي الصور: <code>{len(pending_files)}</code>\n"
-            "• تمت ترجمتها: <code>0</code>\n"
-            "• قيد المعالجة الآن: <code>0</code>\n"
-            "• في الطابور: <code>0</code>\n\n"
-            "<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
+            "⏳ *جاري ترجمة الصور وتجميع الملف...*\n\n"
+            "📊 *إحصائيات الجلسة:*\n"
+            f"• إجمالي الصور: `{len(pending_files)}`\n"
+            "• تمت ترجمتها: `0`\n"
+            "• قيد المعالجة: `0`\n"
+            "• في الطابور: `0`\n\n"
+            "_يعمل النظام بعدد ثابت من العمال المتوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات\\._"
         )
         try:
-            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+            msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
             await container.batch.set_tracker(user_id, msg.message_id)
             await container.batch.force_update_tracker(user_id)
         except Exception as e:

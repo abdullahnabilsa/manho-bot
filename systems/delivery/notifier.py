@@ -43,7 +43,7 @@ class BotErrorNotifier:
             f"❌ *فشلت المعالجة*\n"
             f"🖼️ الملف: `{escape_markdown_v2(job.file_name)}`\n"
             f"⚠️ لم يتمكن النظام من ترجمة هذه الصفحة\\.\n"
-            f"_يرجى المحاولة مرة أخرى لاحقاً._"
+            f"_يرجى المحاولة مرة أخرى لاحقاً\\._"
         )
         try:
             await safe_edit_or_send(self._bot, job, text)

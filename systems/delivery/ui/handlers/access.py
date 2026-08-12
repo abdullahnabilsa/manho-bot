@@ -11,23 +11,17 @@ from systems.delivery.ui.keyboards import build_paginated_keyboard, build_confir
 
 logger = logging.getLogger(__name__)
 
-
-# ============================================================
-# Command Handlers
-# ============================================================
-
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     if not await container.access.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("🚫 *هذا الأمر مخصص للمشرفين فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
     args = context.args
     if not args or not args[0].isdigit():
         context.user_data['awaiting_add_user'] = True
         await update.message.reply_text(
-            "➕ *إضافة مستخدم*\n\n"
-            "أرسل الـ ID الرقمي للمستخدم الآن\\.",
+            "➕ *إضافة مستخدم*\n\nأرسل الـ ID الرقمي للمستخدم الآن\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         return
@@ -80,12 +74,11 @@ async def receive_add_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     if not await container.access.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("🚫 *هذا الأمر مخصص للمشرفين فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
     args = context.args
     if not args or not args[0].isdigit():
-        # Show interactive list
         users = await container.access.get_users()
         if not users:
             await update.message.reply_text(
@@ -121,12 +114,11 @@ async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     if not container.access.is_super_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 هذا الأمر مخصص للسوبر أدمن فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("🚫 *هذا الأمر مخصص للسوبر أدمن فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
     args = context.args
     if not args or not args[0].isdigit():
-        # Show interactive list of regular users
         users = await container.access.get_users()
         if not users:
             await update.message.reply_text(
@@ -162,12 +154,11 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     if not container.access.is_super_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 هذا الأمر مخصص للسوبر أدمن فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("🚫 *هذا الأمر مخصص للسوبر أدمن فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
     args = context.args
     if not args or not args[0].isdigit():
-        # Show interactive list of admins (excluding super admins)
         admins = await container.access.get_admins()
         super_admin_ids = container.access._super_admin_ids
         regular_admins = [a for a in admins if a not in super_admin_ids]
@@ -206,7 +197,7 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
 async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     if not await container.access.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("🚫 *هذا الأمر مخصص للمشرفين فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
     users = await container.access.get_users()
@@ -235,7 +226,7 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def open_requests_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     if not await container.access.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("🚫 *هذا الأمر مخصص للمشرفين فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
     await container.access.set_join_requests(True)
@@ -247,7 +238,7 @@ async def open_requests_command(update: Update, context: ContextTypes.DEFAULT_TY
 async def close_requests_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     if not await container.access.is_admin(update.effective_user.id):
-        await update.message.reply_text("🚫 هذا الأمر مخصص للمشرفين فقط\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text("🚫 *هذا الأمر مخصص للمشرفين فقط\\.*", parse_mode=ParseMode.MARKDOWN_V2)
         return
     
     await container.access.set_join_requests(False)
@@ -257,26 +248,17 @@ async def close_requests_command(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
-
-# ============================================================
-# Interactive Access Callback Handler
-# ============================================================
-
 async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Central router for all adm_(sel|conf|nav)_access_ callbacks."""
     query = update.callback_query
     await query.answer()
     container = context.bot_data["container"]
     data = query.data or ""
     
-    # --- SELECTION: Show confirmation ---
     if data.startswith("adm_sel_access_"):
         parts = data.replace("adm_sel_access_", "").rsplit("_", 1)
-        if len(parts) != 2:
-            return
+        if len(parts) != 2: return
         action, target_id = parts
         
-        # Verify admin permissions
         if action in ("addadmin", "removeadmin"):
             if not container.access.is_super_admin(query.from_user.id):
                 await query.answer("🚫 للسوبر أدمن فقط", show_alert=True)
@@ -292,8 +274,7 @@ async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_T
             "removeadmin": ("📉", "إزالة مشرف", f"سيتم سحب صلاحية المشرف من `{escape_markdown_v2(target_id)}`")
         }
         
-        if action not in action_labels:
-            return
+        if action not in action_labels: return
         
         icon, title, desc = action_labels[action]
         keyboard = build_confirmation_keyboard(f"access_{action}", target_id)
@@ -305,11 +286,9 @@ async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_T
             reply_markup=keyboard
         )
     
-    # --- CONFIRMATION: Execute action ---
     elif data.startswith("adm_conf_access_"):
         parts = data.replace("adm_conf_access_", "").rsplit("_", 1)
-        if len(parts) != 2:
-            return
+        if len(parts) != 2: return
         action, target_id = parts
         user_id = int(target_id)
         escaped_id = escape_markdown_v2(target_id)
@@ -362,17 +341,13 @@ async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_T
                     parse_mode=ParseMode.MARKDOWN_V2
                 )
     
-    # --- NAVIGATION: Show next/prev page ---
     elif data.startswith("adm_nav_access_"):
         parts = data.replace("adm_nav_access_", "").rsplit("_", 1)
-        if len(parts) != 2:
-            return
+        if len(parts) != 2: return
         action, page_str = parts
-        if not page_str.isdigit():
-            return
+        if not page_str.isdigit(): return
         page = int(page_str)
         
-        # Verify admin permissions
         if action in ("addadmin", "removeadmin"):
             if not container.access.is_super_admin(query.from_user.id):
                 await query.answer("🚫 للسوبر أدمن فقط", show_alert=True)
@@ -385,7 +360,6 @@ async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_T
         await _refresh_access_list(query, container, action, page)
 
 async def _refresh_access_list(query, container, action: str, page: int) -> None:
-    """Helper to refresh the paginated access list."""
     if action == "addadmin":
         users = await container.access.get_users()
         items = [(f"👤 {uid}", uid) for uid in users]
@@ -418,11 +392,6 @@ async def _refresh_access_list(query, container, action: str, page: int) -> None
         )
     except Exception:
         pass
-
-
-# ============================================================
-# Join Request Callback Handler (unchanged)
-# ============================================================
 
 async def handle_request_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
