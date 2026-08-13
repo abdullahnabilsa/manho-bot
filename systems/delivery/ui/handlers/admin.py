@@ -1,4 +1,4 @@
-# systems/delivery/ui/handlers/admin.py
+# File: systems/delivery/ui/handlers/admin.py
 from __future__ import annotations
 import logging
 from telegram import Update, InputFile
@@ -24,7 +24,7 @@ async def add_public_key_command(update: Update, context: ContextTypes.DEFAULT_T
     if not await is_admin(update, context): return
     context.user_data['awaiting_admin_api_key'] = True
     await update.message.reply_text(
-        "👑 *إضافة مفتاح عام*\nأرسل مفتاح الـ API العام الآن ليتم إضافته للبوت\\.",
+        "👑 *إضافة مفتاح API عام*\nأرسل المفتاح الآن ليتم إضافته لقاعدة البيانات واستخدامه كمفتاح احتياطي للمستخدمين\\.",
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
@@ -35,12 +35,12 @@ async def receive_admin_api_key(update: Update, context: ContextTypes.DEFAULT_TY
     added = await container.api_keys.add_public_key(key)
     if added:
         await update.message.reply_text(
-            "✅ *نجحت العملية*\nتم إضافة المفتاح العام إلى قاعدة البيانات\\.",
+            "✅ *تمت الإضافة*\nتم إضافة المفتاح العام إلى قاعدة البيانات بنجاح\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
     else:
         await update.message.reply_text(
-            "ℹ️ *معلومات*\nهذا المفتاح مسجل مسبقاً في النظام\\.",
+            "ℹ️ *معلومة*\nهذا المفتاح مسجل مسبقاً في النظام\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
 

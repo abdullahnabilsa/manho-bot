@@ -1,4 +1,4 @@
-# systems/delivery/senders/strategies/grouped_session.py
+# File: systems/delivery/senders/strategies/grouped_session.py
 from __future__ import annotations
 
 import asyncio
@@ -116,35 +116,35 @@ class GroupedSessionStrategy:
             else:
                 files_text = "\n".join([f"{i}. {name}" for i, name in enumerate(file_names, start=1)])
                 
-            files_block = f"<blockquote expandable>📄 <b>الصور المجهزة:</b>\n{files_text}</blockquote>"
+            files_block = f"<blockquote expandable>🖼️ <b>الصور المجهزة ({total_pages}):</b>\n{files_text}</blockquote>"
             
             progress_bar = generate_progress_bar(total_pages, total_received)
             note = await self._batch.get_session_note(job.user_id)
             note_html = escape_html(note) if note else ""
-            note_block = f"\n📝 <b>ملاحظة:</b>\n{note_html}\n" if note_html else ""
+            note_block = f"\n📝 <b>ملاحظة الجلسة:</b>\n{note_html}\n" if note_html else ""
             
             if is_pending:
                 text = (
                     f"{progress_bar}\n\n"
-                    f"⏳ <b>جاري ترجمة الصور وتجميع الملف...</b>\n\n"
-                    f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                    f"⚙️ <b>الجلسة قيد المعالجة والتجميع...</b>\n\n"
+                    f"📊 <b>إحصائيات الجلسة:</b>\n"
                     f"• إجمالي الصور: <code>{total_received}</code>\n"
                     f"• تمت ترجمتها: <code>{total_pages}</code>\n"
-                    f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                    f"• قيد المعالجة: <code>{processing_count}</code>\n"
                     f"• في الطابور: <code>{queue_size}</code>\n"
                     f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
                     f"{files_block}\n"
                     f"{note_block}\n\n"
-                    f"<i>يعمل النظام بـ 5 عمال متوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
+                    f"<i>يعمل النظام بعدد ثابت من العمال المتوازيين، يرجى الانتظار حتى يتم تجميع كل الملفات.</i>"
                 )
             else:
                 text = (
                     f"{progress_bar}\n\n"
-                    f"✅ <b>تمت معالجة الصور بنجاح وتخزينها في الجلسة.</b>\n\n"
-                    f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                    f"✅ <b>تمت معالجة الصور وتخزينها في الجلسة.</b>\n\n"
+                    f"📊 <b>إحصائيات الجلسة:</b>\n"
                     f"• إجمالي الصور المرسلة: <code>{total_received}</code>\n"
                     f"• تمت ترجمتها: <code>{total_pages}</code>\n"
-                    f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                    f"• قيد المعالجة: <code>{processing_count}</code>\n"
                     f"• في الطابور: <code>{queue_size}</code>\n"
                     f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n\n"
                     f"{files_block}\n"
@@ -312,7 +312,7 @@ class GroupedSessionStrategy:
                         )
                     else:
                         files_text = "\n".join([f"{i}. {name}" for i, name in enumerate(file_names, start=1)])
-                    files_block = f"<blockquote expandable>📄 <b>الصور المترجمة:</b>\n{files_text}</blockquote>"
+                    files_block = f"<blockquote expandable>🖼️ <b>الصور المترجمة ({len(session_data)}):</b>\n{files_text}</blockquote>"
                     
                     keyboard = InlineKeyboardMarkup([
                         [InlineKeyboardButton("🧹 تنظيف الشات", callback_data="cleanup_photos")]

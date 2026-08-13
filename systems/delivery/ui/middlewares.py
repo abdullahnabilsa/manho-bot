@@ -1,4 +1,4 @@
-# systems/delivery/ui/middlewares.py
+# File: systems/delivery/ui/middlewares.py
 from __future__ import annotations
 
 from telegram import Update
@@ -71,7 +71,7 @@ async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT
             return
         if update.callback_query.data.startswith(("accept_req", "reject_req")):
             return
-        await update.callback_query.answer("🚫 معطل أثناء الجلسة. اضغط 🔴 إنهاء الجلسة للخروج.", show_alert=True)
+        await update.callback_query.answer("🚫 معطل أثناء الجلسة\\. اضغط 🔴 إنهاء الجلسة للخروج\\.", show_alert=True)
         raise ApplicationHandlerStop
 
     if update.message and (update.message.photo or (update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith('image/'))):

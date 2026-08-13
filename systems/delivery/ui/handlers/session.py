@@ -1,4 +1,4 @@
-# systems/delivery/ui/handlers/session.py
+# File: systems/delivery/ui/handlers/session.py
 from __future__ import annotations
 
 import logging
@@ -32,17 +32,17 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
     
     await container.batch.add_transient_message(user_id, update.message.message_id)
     
-    mode_text = "تجميع جماعي (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
+    mode_text = "تجميع موحد (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
     
     text = (
-        f"🎬 *تم تفعيل وضع الجلسة بنجاح\\!*\n\n"
-        f"📦 *وضع الجلسة الحالي:* {escape_markdown_v2(mode_text)}\n\n"
-        "في هذا الوضع، تم تفعيل *الحماية القصوى* لمنع التشتت:\n"
-        "• سيتم قبول *صور المانغا فقط*\\.\n"
-        "• يمكنك إرسال *أي عدد من الصور* دفعة واحدة أو تباعاً\\.\n"
-        "• سيتم *حذف* أي رسالة نصية، ملصق، أو أمر غير مصرح به فوراً\\.\n\n"
-        "⚠️ *للخروج من هذا الوضع وتجميع الملفات:* اضغط زر *🔴 إنهاء الجلسة*\\.\n"
-        "🚪 _لإلغاء الجلسة بالكامل في أي وقت، أرسل: /cancel_"
+        "🎬 *تم بدء الجلسة بنجاح\\.*\n\n"
+        f"📦 *وضع التجميع:* {escape_markdown_v2(mode_text)}\n\n"
+        "تم تفعيل *وضع الحماية* لضمان تجربة خالية من التشتت:\n"
+        "• يقبل البوت *صور المانغا فقط*\\.\n"
+        "• يمكنك إرسال الصور دفعة واحدة أو تباعاً\\.\n"
+        "• سيتم *تجاهل وحذف* أي رسائل نصية أو أوامر غير مصرح بها فوراً\\.\n\n"
+        "⚠️ عند الانتهاء، اضغط *🔴 إنهاء الجلسة* لبدء الترجمة والتجميع\\.\n"
+        "🚪 للإلغاء الكامل والخروج، أرسل: `/cancel`"
     )
     
     reply_msg = await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -76,7 +76,7 @@ async def set_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="📝 *تم حفظ ملاحظتك\\.*\nسيتم إظهارها في رسالة الإحصائيات وإضافتها لملف الترجمة\\.",
+        text="📝 *تم حفظ الملاحظة\\.*\nسيتم إظهارها في رسالة الإحصائيات وإضافتها لملف الترجمة\\.",
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
@@ -103,7 +103,7 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             
         await context.bot.send_message(
             chat_id=chat_id,
-            text="⚠️ *لا توجد صور للمعالجة\\.*\nتم إنهاء الجلسة الفارغة\\. يمكنك الآن استخدام الأوامر العادية\\.",
+            text="⚠️ *لا توجد صور للمعالجة\\.*\nتم إغلاق الجلسة الفارغة\\.\nيمكنك الآن استخدام الأوامر العادية\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
         return
@@ -125,9 +125,9 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         result = await container.delivery.flush_pending_to_queue(user_id, chat_id)
         if result == FlushResult.WAITING:
             text = (
-                "⏳ *النظام يعمل بكامل طاقته حالياً\\.*\n"
-                "تم وضعك في قائمة الانتظار\\.\n\n"
-                "_لا تحتاج لفعل شيء، سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
+                "⏳ *النظام يعمل بطاقته القصوى حالياً\\.*\n"
+                "تمت إضافتك لقائمة الانتظار\\.\n\n"
+                "_سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
             )
             try:
                 msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -141,13 +141,13 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         elif result == FlushResult.ALLOWED:
             text = (
-                "⏳ *جاري ترجمة الصور وإرسالها فردياً...*\n\n"
+                "⚙️ *بدأت المعالجة الفردية...*\n\n"
                 "📊 *إحصائيات الجلسة:*\n"
                 f"• إجمالي الصور: `{len(pending_files)}`\n"
                 "• تمت ترجمتها: `0`\n"
                 "• قيد المعالجة: `0`\n"
                 "• في الطابور: `0`\n\n"
-                "_يعمل النظام بعدد ثابت من العمال المتوازيين، يرجى الانتظار حتى يتم إرسال كل الملفات\\._"
+                "_يعمل النظام بعدد ثابت من العمال المتوازيين، سيتم إرسال ملف لكل صورة فور انتهائها\\._"
             )
             try:
                 msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -216,9 +216,9 @@ async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if result == FlushResult.WAITING:
         text = (
-            "⏳ *النظام يعمل بكامل طاقته حالياً\\.*\n"
-            "تم وضعك في قائمة الانتظار\\.\n\n"
-            "_لا تحتاج لفعل شيء، سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
+            "⏳ *النظام يعمل بطاقته القصوى حالياً\\.*\n"
+            "تمت إضافتك لقائمة الانتظار\\.\n\n"
+            "_سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
         )
         try:
             msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -232,7 +232,7 @@ async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     elif result == FlushResult.ALLOWED:
         text = (
-            "⏳ *جاري ترجمة الصور وتجميع الملف...*\n\n"
+            "⚙️ *بدأت المعالجة والتجميع...*\n\n"
             "📊 *إحصائيات الجلسة:*\n"
             f"• إجمالي الصور: `{len(pending_files)}`\n"
             "• تمت ترجمتها: `0`\n"
@@ -281,7 +281,7 @@ async def handle_cancel_session(update: Update, context: ContextTypes.DEFAULT_TY
         pass
         
     try:
-        await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء العملية وحذف بيانات الجلسة بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
+        await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء الجلسة وتنظيف البيانات بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
     except Exception:
         pass
 
@@ -330,7 +330,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await container.jobs.cancel_waiting_user(user_id)
         
     try:
-        await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء العملية وحذف بيانات الجلسة بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
+        await context.bot.send_message(chat_id=chat_id, text="🚪 *تم إلغاء الجلسة وتنظيف البيانات بنجاح\\.*", parse_mode=ParseMode.MARKDOWN_V2)
     except Exception:
         pass
     
@@ -370,9 +370,9 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
     
     if result == FlushResult.WAITING:
         text = (
-            "⏳ *النظام يعمل بكامل طاقته حالياً\\.*\n"
-            "تم وضعك في قائمة الانتظار\\.\n\n"
-            "_لا تحتاج لفعل شيء، سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
+            "⏳ *النظام يعمل بطاقته القصوى حالياً\\.*\n"
+            "تمت إضافتك لقائمة الانتظار\\.\n\n"
+            "_سيتم بدء معالجة صورك وإرسال الملفات تلقائياً فور انتهاء الجلسة الحالية\\._"
         )
         try:
             msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2)
@@ -386,7 +386,8 @@ async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT
         return
     elif result == FlushResult.ALLOWED:
         text = (
-            "⏳ *جاري ترجمة الصور وتجميع الملف...*\n\n"
+            f"✅ *تم حفظ الاسم:* `{escaped_filename}`\n\n"
+            "⚙️ *بدأت المعالجة والتجميع...*\n\n"
             "📊 *إحصائيات الجلسة:*\n"
             f"• إجمالي الصور: `{len(pending_files)}`\n"
             "• تمت ترجمتها: `0`\n"

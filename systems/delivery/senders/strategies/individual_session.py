@@ -1,4 +1,4 @@
-# systems/delivery/senders/strategies/individual_session.py
+# File: systems/delivery/senders/strategies/individual_session.py
 from __future__ import annotations
 
 import asyncio
@@ -171,15 +171,15 @@ class IndividualSessionStrategy:
             progress_bar = generate_progress_bar(total_pages, total_received)
             note = await self._batch.get_session_note(job.user_id)
             note_html = escape_html(note) if note else ""
-            note_block = f"\n📝 <b>ملاحظة:</b>\n{note_html}\n" if note_html else ""
+            note_block = f"\n📝 <b>ملاحظة الجلسة:</b>\n{note_html}\n" if note_html else ""
             
             text = (
                 f"{progress_bar}\n\n"
-                f"⏳ <b>جاري ترجمة الصور وإرسالها فردياً...</b>\n\n"
-                f"📊 <b>إحصائيات الجلسة الحالية:</b>\n"
+                f"⚙️ <b>الجلسة قيد المعالجة الفردية...</b>\n\n"
+                f"📊 <b>إحصائيات الجلسة:</b>\n"
                 f"• إجمالي الصور: <code>{total_received}</code>\n"
                 f"• تمت ترجمتها: <code>{total_pages}</code>\n"
-                f"• قيد المعالجة الآن: <code>{processing_count}</code>\n"
+                f"• قيد المعالجة: <code>{processing_count}</code>\n"
                 f"• في الطابور: <code>{queue_size}</code>\n"
                 f"⏱ <b>الوقت المنقضي:</b> <code>{elapsed_time}</code>\n"
                 f"{note_block}\n\n"
@@ -267,7 +267,7 @@ class IndividualSessionStrategy:
                     )
                 else:
                     files_text = "\n".join([f"{i}. {name}" for i, name in enumerate(file_names, start=1)])
-                files_block = f"<blockquote expandable>📄 <b>الصور المترجمة:</b>\n{files_text}</blockquote>"
+                files_block = f"<blockquote expandable>🖼️ <b>الصور المترجمة ({len(session_data)}):</b>\n{files_text}</blockquote>"
                 
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🧹 تنظيف الشات", callback_data="cleanup_photos")]

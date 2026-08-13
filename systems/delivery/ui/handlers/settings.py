@@ -25,19 +25,19 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     mode_display = "رسالة موحدة" if mode == "single_message" else "فصل المشاهد"
     if output_method == "chat_and_files":
         output_method = "messages_and_files"
-    output_display = "رسائل وملفات" if output_method == "messages_and_files" else ("رسائل تلجرام فقط" if output_method == "messages_only" else "ملفات فقط")
+    output_display = "رسائل وملفات" if output_method == "messages_and_files" else ("رسائل فقط" if output_method == "messages_only" else "ملفات فقط")
     file_fmt_escaped = escape_markdown_v2(file_format.upper())
-    session_display = "تجميع فردي" if session_mode == "individual" else "تجميع جماعي"
-    glossary_display = "مفصل ❌" if use_glossary == "false" else "مفعل ✅"
+    session_display = "فردي (ملف لكل صورة)" if session_mode == "individual" else "موحد (ملف واحد)"
+    glossary_display = "مفعل ✅" if use_glossary == "true" else "معطل ❌"
     
     text = (
-        "⚙️ *لوحة التحكم الرئيسية*\n\n"
+        "⚙️ *لوحة الإعدادات*\n\n"
         "إليك إعداداتك الحالية\\. اضغط على أي خيار لتعديله:\n\n"
-        f"🎭 *المترجم الحالي:* {escape_markdown_v2(persona)}\n"
-        f"📨 *نمط الإرسال:* {escape_markdown_v2(mode_display)}\n"
+        f"🎭 *المترجم:* {escape_markdown_v2(persona)}\n"
+        f"📨 *تقسيم الرسائل:* {escape_markdown_v2(mode_display)}\n"
         f"📤 *طريقة الإخراج:* {escape_markdown_v2(output_display)}\n"
         f"📄 *صيغة الملفات:* {file_fmt_escaped}\n"
-        f"📦 *وضع الجلسة:* {escape_markdown_v2(session_display)}\n"
+        f"📦 *وضع التجميع:* {escape_markdown_v2(session_display)}\n"
         f"📚 *القاموس:* {escape_markdown_v2(glossary_display)}\n\n"
         "_اضغط على الأزرار أدناه للتعديل_"
     )
@@ -68,7 +68,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("🎭 *اختيار المترجم*\n\nاختر أسلوب الترجمة الذي يناسب عملك:", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_personas_keyboard(personas, current))
     elif data == "open_delivery_mode":
         current = (await container.settings.get_user_settings(user_id)).get("mode")
-        await query.edit_message_text("📨 *وضع الإرسال*\n\nحدد كيف تريد تقسيم الرسائل:", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_delivery_mode_keyboard(current))
+        await query.edit_message_text("📨 *تقسيم الرسائل*\n\nاختر طريقة تقسيم الرسائل:", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_delivery_mode_keyboard(current))
     elif data == "open_output_method":
         current = (await container.settings.get_user_settings(user_id)).get("output_method")
         await query.edit_message_text("📤 *طريقة الإخراج*\n\nكيف تريد استلام الترجمة النهائية؟", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_output_method_keyboard(current))
@@ -77,7 +77,7 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text("📄 *صيغة الملفات*\n\nاختر صيغة ملفات التحميل:", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_file_format_keyboard(current))
     elif data == "open_session_mode":
         current = (await container.settings.get_user_settings(user_id)).get("session_mode")
-        await query.edit_message_text("📦 *وضع الجلسة*\n\nاختر طريقة تجميع ملفات الترجمة عند إرسال الصور:", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_session_mode_keyboard(current))
+        await query.edit_message_text("📦 *وضع التجميع*\n\nاختر طريقة تجميع ملفات الترجمة عند إنهاء الجلسة:", parse_mode=ParseMode.MARKDOWN_V2, reply_markup=get_session_mode_keyboard(current))
     elif data == "toggle_glossary":
         current = (await container.settings.get_user_settings(user_id)).get("use_glossary", "false")
         new_val = "true" if current == "false" else "false"

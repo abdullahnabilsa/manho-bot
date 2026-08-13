@@ -1,4 +1,4 @@
-# systems/delivery/ui/handlers/access.py
+# File: systems/delivery/ui/handlers/access.py
 from __future__ import annotations
 import logging
 from typing import List, Tuple
@@ -37,7 +37,7 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
     else:
         await update.message.reply_text(
-            f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` موجود مسبقاً في القائمة أو أنه مشرف\\.",
+            f"ℹ️ *معلومة*\nالمستخدم `{escaped_id}` موجود مسبقاً أو أنه مشرف\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
@@ -67,7 +67,7 @@ async def receive_add_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
     else:
         await update.message.reply_text(
-            f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` موجود مسبقاً في القائمة أو أنه مشرف\\.",
+            f"ℹ️ *معلومة*\nالمستخدم `{escaped_id}` موجود مسبقاً أو أنه مشرف\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
@@ -130,7 +130,7 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         items = [(f"👤 {uid}", uid) for uid in users]
         keyboard = build_paginated_keyboard(items, "access_addadmin", page=0)
         await update.message.reply_text(
-            "👑 *ترقية مستخدم لمشرف*\n\nاختر المستخدم من القائمة:",
+            "👑 *ترقية لمشرف*\n\nاختر المستخدم من القائمة:",
             parse_mode=ParseMode.MARKDOWN_V2,
             reply_markup=keyboard
         )
@@ -147,7 +147,7 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
     else:
         await update.message.reply_text(
-            f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` مشرف مسبقاً أو أنه السوبر أدمن\\.",
+            f"ℹ️ *معلومة*\nالمستخدم `{escaped_id}` مشرف مسبقاً أو أنه سوبر أدمن\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
@@ -190,7 +190,7 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
         )
     else:
         await update.message.reply_text(
-            f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` ليس مشرفاً أو أنه السوبر أدمن \\(لا يمكن حذفه\\)\\.",
+            f"⚠️ *غير موجود*\nالمستخدم `{escaped_id}` ليس مشرفاً أو أنه سوبر أدمن \\(لا يمكن حذفه\\)\\.",
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
@@ -321,7 +321,7 @@ async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_T
                 )
             else:
                 await query.edit_message_text(
-                    f"ℹ️ *معلومات*\nالمستخدم `{escaped_id}` مشرف مسبقاً\\.",
+                    f"ℹ️ *معلومة*\nالمستخدم `{escaped_id}` مشرف مسبقاً\\.",
                     parse_mode=ParseMode.MARKDOWN_V2
                 )
         
@@ -363,7 +363,7 @@ async def _refresh_access_list(query, container, action: str, page: int) -> None
     if action == "addadmin":
         users = await container.access.get_users()
         items = [(f"👤 {uid}", uid) for uid in users]
-        title = "👑 *ترقية مستخدم لمشرف*\n\nاختر المستخدم:"
+        title = "👑 *ترقية لمشرف*\n\nاختر المستخدم:"
     elif action == "removeadmin":
         admins = await container.access.get_admins()
         super_admin_ids = container.access._super_admin_ids
@@ -415,7 +415,7 @@ async def handle_request_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("تمت معالجة هذا الطلب مسبقاً.", show_alert=True)
         try:
             await query.edit_message_text(
-                f"ℹ️ *تمت معالجة هذا الطلب مسبقاً\\.*\nالمستخدم `{escaped_user_id}` تمت إضافته أو رفضه\\.",
+                f"ℹ️ *تمت المعالجة مسبقاً*\nالمستخدم `{escaped_user_id}` تمت إضافته أو رفضه\\.",
                 parse_mode=ParseMode.MARKDOWN_V2
             )
         except Exception:
@@ -459,7 +459,7 @@ async def handle_request_callback(update: Update, context: ContextTypes.DEFAULT_
         await container.access.clear_requests(user_id)
         try:
             user_msg = (
-                f"🎉 *مبروك\\! تم قبول طلب انضمامك\\.*\n\n"
+                f"🎉 *تم قبول طلب انضمامك\\!*\n\n"
                 f"👑 تمت الموافقة عليك بواسطة المشرف: {admin_mention}\n\n"
                 f"يمكنك الآن استخدام البوت بحرية\\.\n"
                 f"أرسل /start للبدء\\."
