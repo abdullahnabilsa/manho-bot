@@ -18,6 +18,16 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
 
+def get_session_tracker_keyboard() -> InlineKeyboardMarkup:
+    """Interactive keyboard attached to the live session tracker."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ إضافة ملاحظة", callback_data="add_note_prompt")],
+        [
+            InlineKeyboardButton("🔴 إنهاء الجلسة", callback_data="end_session_inline"),
+            InlineKeyboardButton("🚫 إلغاء الجلسة", callback_data="cancel_session_inline")
+        ]
+    ])
+
 def get_settings_dashboard_keyboard(user_settings: dict) -> InlineKeyboardMarkup:
     persona = user_settings.get("persona", "Default Translator")
     mode = "رسالة موحدة" if user_settings.get("mode") == "single_message" else "فصل المشاهد"

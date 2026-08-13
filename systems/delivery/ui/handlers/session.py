@@ -18,6 +18,7 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id
     
     context.user_data['awaiting_session_filename'] = False
+    context.user_data['awaiting_session_note'] = False
     await container.batch.set_finalizing(user_id, False)
     
     persona_name = await container.settings.get_persona(user_id)
@@ -30,7 +31,8 @@ async def start_session_command(update: Update, context: ContextTypes.DEFAULT_TY
         
     await container.batch.start_session(user_id, persona_name, session_mode)
     
-    await container.batch.add_transient_message(user_id, update.message.message_id)
+    if update.message:
+        await container.batch.add_transient_message(user_id, update.message.message_id)
     
     mode_text = "تجميع موحد (ملف واحد لكل الجلسة)" if session_mode == "grouped" else "تجميع فردي (ملف لكل صورة)"
     
@@ -61,10 +63,21 @@ async def set_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
     note_text = update.message.text[len("/note"):].strip()
     if not note_text:
-        await update.message.reply_text(
-            "⚠️ يرجى كتابة الملاحظة بعد الأمر\\. مثال: `/note هذا الفصل يركز على الحركة`",
-            parse_mode=ParseMode.MARKDOWN_V2
+        context.user_data['awaiting_session_note'] = True
+        text = (
+            "📝 *وضع إدخال الملاحظة*\n\n"
+            "يرجى إرسال الملاحظة الآن كرسالة نصية واحدة\\.\n\n"
+            "_سيتم استخدام هذه الملاحظة في ملف الترجمة ورسالة الإحصائيات\\._"
         )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ إلغاء الإدخال", callback_data="cancel_note_prompt")]
+        ])
+        msg = await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
+        context.user_data['note_prompt_msg_id'] = msg.message_id
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
         return
         
     await container.batch.set_session_note(user_id, note_text)
@@ -80,15 +93,98 @@ async def set_note_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         parse_mode=ParseMode.MARKDOWN_V2
     )
 
+async def handle_add_note_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    container = context.bot_data["container"]
+    user_id = query.from_user.id
+    chat_id = query.message.chat_id
+    
+    context.user_data['awaiting_session_note'] = True
+    text = (
+        "📝 *وضع إدخال الملاحظة*\n\n"
+        "يرجى إرسال الملاحظة الآن كرسالة نصية واحدة\\.\n\n"
+        "_سيتم استخدام هذه الملاحظة في ملف الترجمة ورسالة الإحصائيات\\._"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("❌ إلغاء الإدخال", callback_data="cancel_note_prompt")]
+    ])
+    msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
+    context.user_data['note_prompt_msg_id'] = msg.message_id
+
+async def handle_cancel_note_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("تم الإلغاء")
+    chat_id = query.message.chat_id
+    
+    context.user_data['awaiting_session_note'] = False
+    note_prompt_msg_id = context.user_data.pop('note_prompt_msg_id', None)
+    if note_prompt_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=note_prompt_msg_id)
+        except Exception:
+            pass
+
+async def receive_session_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    container = context.bot_data["container"]
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    context.user_data['awaiting_session_note'] = False
+    note_text = update.message.text
+    
+    await container.batch.set_session_note(user_id, note_text)
+    
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+    
+    note_prompt_msg_id = context.user_data.pop('note_prompt_msg_id', None)
+    if note_prompt_msg_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=note_prompt_msg_id)
+        except Exception:
+            pass
+            
+    await container.batch.force_update_tracker(user_id)
+
+async def handle_end_session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    container = context.bot_data["container"]
+    user_id = query.from_user.id
+    chat_id = query.message.chat_id
+    
+    tracker_id = await container.batch.get_tracker(user_id)
+    if tracker_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=tracker_id)
+        except Exception:
+            pass
+        await container.batch.set_tracker(user_id, None)
+        
+    await end_session_command(update, context)
+
+async def handle_cancel_session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await cancel_command(update, context)
+
 async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
-    await container.batch.add_transient_message(user_id, update.message.message_id)
+    if update.message:
+        await container.batch.add_transient_message(user_id, update.message.message_id)
     
     if not await container.batch.is_session_active(user_id):
-        await update.message.reply_text("⚠️ *لا توجد جلسة نشطة حالياً\\.*\nاضغط *🟢 بدء الجلسة* أولاً قبل إرسال الصور\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await context.bot.send_message(
+            chat_id=chat_id, 
+            text="⚠️ *لا توجد جلسة نشطة حالياً\\.*\nاضغط *🟢 بدء الجلسة* أولاً قبل إرسال الصور\\.", 
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
         return
 
     pending_files = await container.batch.get_pending_files(user_id)
@@ -96,10 +192,11 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data['awaiting_session_filename'] = False
         await container.batch.clear_session(user_id)
         
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
+        if update.message:
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
             
         await context.bot.send_message(
             chat_id=chat_id,
@@ -174,13 +271,13 @@ async def end_session_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     ])
     
     try:
-        prompt_msg = await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
+        prompt_msg = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=keyboard)
         await container.batch.set_prompt_message_id(user_id, prompt_msg.message_id)
     except Exception as e:
         logger.error(f"Failed to send filename prompt: {e}")
         context.user_data['awaiting_session_filename'] = False
         await container.batch.set_finalizing(user_id, False)
-        await update.message.reply_text("⚠️ حدث خطأ فني، يرجى المحاولة مرة أخرى\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await context.bot.send_message(chat_id=chat_id, text="⚠️ حدث خطأ فني، يرجى المحاولة مرة أخرى\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -233,7 +330,7 @@ async def handle_skip_filename(update: Update, context: ContextTypes.DEFAULT_TYP
     elif result == FlushResult.ALLOWED:
         text = (
             "⚙️ *بدأت المعالجة والتجميع...*\n\n"
-            "📊 *إحصائيات الجلسة:*\n"
+            "📊 *إحصاثيات الجلسة:*\n"
             f"• إجمالي الصور: `{len(pending_files)}`\n"
             "• تمت ترجمتها: `0`\n"
             "• قيد المعالجة: `0`\n"
@@ -296,13 +393,15 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     if not is_active and not is_finalizing and not context.user_data.get('awaiting_session_filename'):
         await container.jobs.cancel_waiting_user(user_id)
-        try:
-            await update.message.delete()
-        except Exception:
-            pass
+        if update.message:
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
         return
             
     context.user_data['awaiting_session_filename'] = False
+    context.user_data['awaiting_session_note'] = False
     await container.batch.set_finalizing(user_id, False)
     
     tracker_id = await container.batch.get_tracker(user_id)
@@ -334,10 +433,11 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception:
         pass
     
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
+    if update.message:
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
 
 async def receive_session_filename(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]

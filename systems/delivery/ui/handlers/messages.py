@@ -12,6 +12,7 @@ from telegram.constants import ParseMode
 from telegram.error import RetryAfter, BadRequest
 
 from utils.markdown_escaper import escape_html
+from systems.delivery.ui.keyboards import get_session_tracker_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +90,14 @@ async def _render_intake_tracker(update: Update, context: ContextTypes.DEFAULT_T
             f"<i>عند الانتهاء من رفع كل الصور، اضغط 🔴 إنهاء الجلسة لبدء المعالجة.</i>"
         )
         
+        markup = get_session_tracker_keyboard()
+        
         if tracker_id:
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id, message_id=tracker_id,
-                    text=text, parse_mode=ParseMode.HTML
+                    text=text, parse_mode=ParseMode.HTML,
+                    reply_markup=markup
                 )
                 return
             except BadRequest as e:
@@ -110,7 +114,8 @@ async def _render_intake_tracker(update: Update, context: ContextTypes.DEFAULT_T
                 try:
                     await bot.edit_message_text(
                         chat_id=chat_id, message_id=tracker_id,
-                        text=text, parse_mode=ParseMode.HTML
+                        text=text, parse_mode=ParseMode.HTML,
+                        reply_markup=markup
                     )
                 except Exception:
                     pass
@@ -121,7 +126,8 @@ async def _render_intake_tracker(update: Update, context: ContextTypes.DEFAULT_T
         if not tracker_id:
             try:
                 msg = await bot.send_message(
-                    chat_id=chat_id, text=text, parse_mode=ParseMode.HTML
+                    chat_id=chat_id, text=text, parse_mode=ParseMode.HTML,
+                    reply_markup=markup
                 )
                 await batch_manager.set_tracker(user_id, msg.message_id)
             except Exception as e:
@@ -249,7 +255,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if context.user_data.get('awaiting_user_api_key'):
+    if context.user_data.get('awaiting_session_note'):
+        from systems.delivery.ui.handlers.session import receive_session_note
+        await receive_session_note(update, context)
+    elif context.user_data.get('awaiting_user_api_key'):
         from systems.delivery.ui.handlers.api_keys import receive_user_api_key
         await receive_user_api_key(update, context)
     elif context.user_data.get('awaiting_admin_api_key'):

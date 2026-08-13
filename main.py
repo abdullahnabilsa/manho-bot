@@ -44,7 +44,8 @@ from systems.delivery.ui.handlers.start import start_command, help_command
 from systems.delivery.ui.handlers.settings import settings_command, settings_callback
 from systems.delivery.ui.handlers.session import (
     start_session_command, end_session_command, cancel_command, receive_session_filename,
-    set_note_command, handle_skip_filename, handle_cancel_session, handle_cleanup_photos_callback
+    set_note_command, handle_skip_filename, handle_cancel_session, handle_cleanup_photos_callback,
+    handle_add_note_prompt, handle_cancel_note_prompt, handle_end_session_callback, handle_cancel_session_callback
 )
 from systems.delivery.ui.handlers.admin import (
     add_public_key_command, list_public_keys_command, remove_public_key_command,
@@ -230,6 +231,12 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_cleanup_photos_callback, pattern="^cleanup_photos$"))
     app.add_handler(CallbackQueryHandler(handle_admin_cancel, pattern="^adm_cancel$"))
     app.add_handler(CallbackQueryHandler(handle_request_callback, pattern="^(accept_req|reject_req)"))
+    
+    # New UX Session Callbacks
+    app.add_handler(CallbackQueryHandler(handle_add_note_prompt, pattern="^add_note_prompt$"))
+    app.add_handler(CallbackQueryHandler(handle_cancel_note_prompt, pattern="^cancel_note_prompt$"))
+    app.add_handler(CallbackQueryHandler(handle_end_session_callback, pattern="^end_session_inline$"))
+    app.add_handler(CallbackQueryHandler(handle_cancel_session_callback, pattern="^cancel_session_inline$"))
     
     app.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

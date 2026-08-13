@@ -5,10 +5,14 @@ from telegram import Update
 from telegram.ext import ContextTypes, ApplicationHandlerStop
 
 from shared.container import ServiceContainer
-from systems.delivery.ui.handlers.session import receive_session_filename
+from systems.delivery.ui.handlers.session import receive_session_filename, receive_session_note
 
 # Callbacks that bypass middleware blocks
-ALLOWED_SESSION_CALLBACKS = {"skip_filename", "cancel_session", "cleanup_photos"}
+ALLOWED_SESSION_CALLBACKS = {
+    "skip_filename", "cancel_session", "cleanup_photos", 
+    "add_note_prompt", "cancel_note_prompt", 
+    "end_session_inline", "cancel_session_inline"
+}
 
 async def state_purge_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('awaiting_session_filename'):
@@ -40,6 +44,24 @@ async def state_purge_middleware(update: Update, context: ContextTypes.DEFAULT_T
                 pass
             raise ApplicationHandlerStop
 
+    if context.user_data.get('awaiting_session_note'):
+        if update.callback_query:
+            if update.callback_query.data in ALLOWED_SESSION_CALLBACKS:
+                return
+            await update.callback_query.answer("📝 يرجى إرسال الملاحظة كنص أو إلغاء الإدخال.", show_alert=True)
+            raise ApplicationHandlerStop
+            
+        msg = update.message
+        if msg and msg.text and not msg.text.startswith('/'):
+            return
+            
+        if msg:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            raise ApplicationHandlerStop
+
     is_command = update.message and update.message.text and update.message.text.startswith('/')
     is_callback = update.callback_query is not None
     is_media = update.message and (
@@ -63,7 +85,7 @@ async def session_guard_middleware(update: Update, context: ContextTypes.DEFAULT
     if not await container.batch.is_session_active(user_id):
         return
 
-    if context.user_data.get('awaiting_session_filename'):
+    if context.user_data.get('awaiting_session_filename') or context.user_data.get('awaiting_session_note'):
         return
         
     if update.callback_query:
