@@ -21,7 +21,7 @@ def get_persistent_keyboard() -> ReplyKeyboardMarkup:
 def get_session_tracker_keyboard() -> InlineKeyboardMarkup:
     """Interactive keyboard attached to the live session tracker."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ إضافة ملاحظة", callback_data="add_note_prompt")],
+        [InlineKeyboardButton("➕ إضافة ملاحظة", callback_data="session_add_note")],
         [
             InlineKeyboardButton("🔴 إنهاء الجلسة", callback_data="end_session_inline"),
             InlineKeyboardButton("🚫 إلغاء الجلسة", callback_data="cancel_session_inline")

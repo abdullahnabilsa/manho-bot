@@ -10,7 +10,7 @@ from systems.delivery.ui.handlers.session import receive_session_filename, recei
 # Callbacks that bypass middleware blocks
 ALLOWED_SESSION_CALLBACKS = {
     "skip_filename", "cancel_session", "cleanup_photos", 
-    "add_note_prompt", "cancel_note_prompt", 
+    "session_add_note", "cancel_note_prompt", 
     "end_session_inline", "cancel_session_inline"
 }
 

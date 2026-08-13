@@ -233,7 +233,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_request_callback, pattern="^(accept_req|reject_req)"))
     
     # New UX Session Callbacks
-    app.add_handler(CallbackQueryHandler(handle_add_note_prompt, pattern="^add_note_prompt$"))
+    app.add_handler(CallbackQueryHandler(handle_add_note_prompt, pattern="^session_add_note$"))
     app.add_handler(CallbackQueryHandler(handle_cancel_note_prompt, pattern="^cancel_note_prompt$"))
     app.add_handler(CallbackQueryHandler(handle_end_session_callback, pattern="^end_session_inline$"))
     app.add_handler(CallbackQueryHandler(handle_cancel_session_callback, pattern="^cancel_session_inline$"))
