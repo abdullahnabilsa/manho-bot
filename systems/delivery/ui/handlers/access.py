@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from typing import List, Tuple
-from telegram import Update
+from telegram import Update, BotCommand, BotCommandScopeChat
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -10,6 +10,28 @@ from utils.markdown_escaper import escape_markdown_v2
 from systems.delivery.ui.keyboards import build_paginated_keyboard, build_confirmation_keyboard
 
 logger = logging.getLogger(__name__)
+
+def get_public_commands() -> list[BotCommand]:
+    return [
+        BotCommand("start", "بدء استخدام البوت"), BotCommand("settings", "فتح الإعدادات"),
+        BotCommand("help", "دليل الاستخدام"), BotCommand("start_session", "بدء الجلسة"),
+        BotCommand("end_session", "إنهاء الجلسة"), BotCommand("cancel", "إلغاء الجلسة"),
+        BotCommand("note", "إضافة ملاحظة للجلسة")
+    ]
+
+def get_admin_commands() -> list[BotCommand]:
+    return get_public_commands() + [
+        BotCommand("addkey", "➕ إضافة مفتاح API"), BotCommand("listkeys", "📋 عرض مفاتيح API"),
+        BotCommand("removekey", "🗑️ حذف مفتاح API"), BotCommand("adduser", "➕ إضافة مستخدم"),
+        BotCommand("removeuser", "🗑️ حذف مستخدم"), BotCommand("listusers", "📋 عرض المستخدمين"),
+        BotCommand("openrequests", "🟢 فتح باب الانضمام"), BotCommand("closerequests", "🔴 إغلاق باب الانضمام"),
+        BotCommand("uploaddict", "📚 رفع قاموس المصطلحات"), BotCommand("downloaddict", "📥 تحميل القاموس"),
+    ]
+
+def get_super_admin_commands() -> list[BotCommand]:
+    return get_admin_commands() + [
+        BotCommand("addadmin", "👑 ترقية لمشرف"), BotCommand("removeadmin", "📉 إزالة مشرف")
+    ]
 
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     container = context.bot_data["container"]
@@ -141,6 +163,15 @@ async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     added = await container.access.add_admin(user_id)
     
     if added:
+        try:
+            await context.bot.set_my_commands(
+                get_admin_commands(), 
+                scope=BotCommandScopeChat(chat_id=user_id)
+            )
+            logger.info(f"Successfully set admin commands dynamically for {user_id}")
+        except Exception as e:
+            logger.warning(f"Could not set commands for new admin {user_id}: {e}")
+
         await update.message.reply_text(
             f"👑 *تمت الترقية بنجاح*\nأصبح المستخدم `{escaped_id}` مشرفاً في البوت\\.",
             parse_mode=ParseMode.MARKDOWN_V2
@@ -184,6 +215,15 @@ async def remove_admin_command(update: Update, context: ContextTypes.DEFAULT_TYP
     removed = await container.access.remove_admin(user_id)
     
     if removed:
+        try:
+            await context.bot.set_my_commands(
+                get_public_commands(), 
+                scope=BotCommandScopeChat(chat_id=user_id)
+            )
+            logger.info(f"Successfully reset commands to public for demoted admin {user_id}")
+        except Exception as e:
+            logger.warning(f"Could not reset commands for removed admin {user_id}: {e}")
+
         await update.message.reply_text(
             f"📉 *تمت الإزالة بنجاح*\nتم سحب صلاحية المشرف من `{escaped_id}`\\.",
             parse_mode=ParseMode.MARKDOWN_V2
@@ -315,6 +355,14 @@ async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_T
                 return
             added = await container.access.add_admin(user_id)
             if added:
+                try:
+                    await context.bot.set_my_commands(
+                        get_admin_commands(), 
+                        scope=BotCommandScopeChat(chat_id=user_id)
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not set commands for new admin {user_id}: {e}")
+
                 await query.edit_message_text(
                     f"👑 *تمت الترقية بنجاح*\nأصبح المستخدم `{escaped_id}` مشرفاً\\.",
                     parse_mode=ParseMode.MARKDOWN_V2
@@ -331,6 +379,14 @@ async def handle_access_callback(update: Update, context: ContextTypes.DEFAULT_T
                 return
             removed = await container.access.remove_admin(user_id)
             if removed:
+                try:
+                    await context.bot.set_my_commands(
+                        get_public_commands(), 
+                        scope=BotCommandScopeChat(chat_id=user_id)
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not reset commands for removed admin {user_id}: {e}")
+
                 await query.edit_message_text(
                     f"📉 *تمت الإزالة بنجاح*\nتم سحب صلاحية المشرف من `{escaped_id}`\\.",
                     parse_mode=ParseMode.MARKDOWN_V2

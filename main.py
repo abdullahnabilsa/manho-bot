@@ -55,7 +55,8 @@ from systems.delivery.ui.handlers.admin import (
 from systems.delivery.ui.handlers.access import (
     add_user_command, remove_user_command, add_admin_command, remove_admin_command, 
     list_users_command, open_requests_command, close_requests_command,
-    handle_request_callback, handle_access_callback
+    handle_request_callback, handle_access_callback,
+    get_public_commands, get_admin_commands, get_super_admin_commands
 )
 from systems.delivery.ui.handlers.messages import handle_image, handle_text, handle_document
 from systems.delivery.ui.middlewares import state_purge_middleware, session_guard_middleware
@@ -152,32 +153,29 @@ async def post_init(app: Application) -> None:
     )
     app.bot_data["container"] = container
     
-    public_commands = [
-        BotCommand("start", "بدء استخدام البوت"), BotCommand("settings", "فتح الإعدادات"),
-        BotCommand("help", "دليل الاستخدام"), BotCommand("start_session", "بدء الجلسة"),
-        BotCommand("end_session", "إنهاء الجلسة"), BotCommand("cancel", "إلغاء الجلسة"),
-        BotCommand("note", "إضافة ملاحظة للجلسة")
-    ]
-    await bot.set_my_commands(public_commands)
+    # --- Bot Commands Setup ---
+    public_commands = get_public_commands()
+    admin_commands = get_admin_commands()
+    super_admin_commands = get_super_admin_commands()
     
-    admin_commands = public_commands + [
-        BotCommand("addkey", "➕ إضافة مفتاح API"), BotCommand("listkeys", "📋 عرض مفاتيح API"),
-        BotCommand("removekey", "🗑️ حذف مفتاح API"), BotCommand("adduser", "➕ إضافة مستخدم"),
-        BotCommand("removeuser", "🗑️ حذف مستخدم"), BotCommand("listusers", "📋 عرض المستخدمين"),
-        BotCommand("openrequests", "🟢 فتح باب الانضمام"), BotCommand("closerequests", "🔴 إغلاق باب الانضمام"),
-        BotCommand("uploaddict", "📚 رفع قاموس المصطلحات"), BotCommand("downloaddict", "📥 تحميل القاموس"),
-    ]
-    super_admin_commands = admin_commands + [
-        BotCommand("addadmin", "👑 ترقية لمشرف"), BotCommand("removeadmin", "📉 إزالة مشرف")
-    ]
+    # Clear any lingering default/global commands to ensure scoped commands work perfectly
+    await bot.delete_my_commands()
+    await bot.set_my_commands(public_commands)
+    logger.info("Default public commands set for all users.")
     
     admins = await access_manager.get_admins()
-    for admin_id in admins:
+    logger.info(f"Registering scoped commands for {len(admins)} admins/super_admins...")
+    
+    for admin_id_str in admins:
         try:
-            cmds = super_admin_commands if access_manager.is_super_admin(int(admin_id)) else admin_commands
-            await bot.set_my_commands(cmds, scope=BotCommandScopeChat(chat_id=int(admin_id)))
+            admin_id = int(admin_id_str)
+            is_super = access_manager.is_super_admin(admin_id)
+            cmds = super_admin_commands if is_super else admin_commands
+            
+            await bot.set_my_commands(cmds, scope=BotCommandScopeChat(chat_id=admin_id))
+            logger.info(f"Successfully set {'SUPER ' if is_super else ''}admin commands for ID: {admin_id}")
         except Exception as e:
-            logger.warning(f"Could not set admin commands for {admin_id}: {e}")
+            logger.warning(f"Could not set admin commands for {admin_id_str}: {e}")
             
     await job_manager.start()
 
